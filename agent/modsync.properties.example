@@ -11,12 +11,11 @@ github.token=github_pat_xxxxxxxx
 # Custom event name; must match the workflow's repository_dispatch type.
 github.event_type=mods-changed
 
-# How often to fingerprint mods/ (seconds). 900 = 15 min.
-interval.seconds=900
-
-# Delay before the first check after boot (seconds).
-first.delay.seconds=30
+# The agent checks mods/ ONCE per boot (mods only load on restart anyway).
+# This is just a settle delay before that check, in seconds.
+startup.delay.seconds=10
 
 # Paths inside the container. Defaults are correct for PebbleHost.
 mods.dir=/home/container/mods
 state.file=/home/container/.modsync-hash
+log.file=/home/container/modsync.log

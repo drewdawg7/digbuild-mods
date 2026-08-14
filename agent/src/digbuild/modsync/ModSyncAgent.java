@@ -17,9 +17,6 @@ import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
 import java.util.Properties;
-import java.util.concurrent.Executors;
-import java.util.concurrent.ScheduledExecutorService;
-import java.util.concurrent.TimeUnit;
 
 /**
  * In-JVM scheduler for a managed (shell-less) Pterodactyl game server.
@@ -54,7 +51,8 @@ public final class ModSyncAgent {
     /** standalone entry point, for local testing: java -jar agent.jar config.properties */
     public static void main(String[] args) throws InterruptedException {
         start(args.length > 0 ? args[0] : null);
-        Thread.currentThread().join();
+        // one-shot: give the boot-check thread time to finish, then exit
+        Thread.sleep(30_000);
     }
 
     private static void start(String configPath) {
@@ -67,8 +65,9 @@ public final class ModSyncAgent {
 
         final Path modsDir = Paths.get(cfg.getProperty("mods.dir", "/home/container/mods"));
         final Path stateFile = Paths.get(cfg.getProperty("state.file", "/home/container/.modsync-hash"));
-        final long interval = parseLong(cfg.getProperty("interval.seconds", "900"), 900);
-        final long firstDelay = parseLong(cfg.getProperty("first.delay.seconds", "30"), 30);
+        // Mods only load on (re)start, so every real change is followed by a boot.
+        // We check once here — no polling. A small delay lets the server settle.
+        final long delay = parseLong(cfg.getProperty("startup.delay.seconds", "10"), 10);
         final String repo = cfg.getProperty("github.repo");        // "owner/name"
         final String token = cfg.getProperty("github.token");
         final String event = cfg.getProperty("github.event_type", "mods-changed");
@@ -78,16 +77,19 @@ public final class ModSyncAgent {
             return;
         }
 
-        final ScheduledExecutorService exec = Executors.newSingleThreadScheduledExecutor(r -> {
-            Thread t = new Thread(r, "modsync-agent");
-            t.setDaemon(true);            // must never hold the JVM open on shutdown
-            return t;
-        });
+        Thread t = new Thread(() -> {
+            try {
+                if (delay > 0) Thread.sleep(delay * 1000L);
+            } catch (InterruptedException e) {
+                return;
+            }
+            tick(modsDir, stateFile, repo, token, event);
+            log("boot check complete.");
+        }, "modsync-agent");
+        t.setDaemon(true);   // never hold the JVM open on shutdown
+        t.start();
 
-        exec.scheduleWithFixedDelay(() -> tick(modsDir, stateFile, repo, token, event),
-                firstDelay, interval, TimeUnit.SECONDS);
-
-        log("started; watching " + modsDir + " every " + interval + "s -> " + repo);
+        log("started; one-shot boot check of " + modsDir + " -> " + repo);
     }
 
     private static void tick(Path modsDir, Path stateFile, String repo, String token, String event) {
