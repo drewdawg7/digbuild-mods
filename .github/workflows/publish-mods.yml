@@ -1,0 +1,89 @@
+name: publish-mods
+
+# Triggered by the in-JVM agent on the game server: it fingerprints mods/ on its
+# own 15-min timer and fires repository_dispatch only when something changed.
+# No polling here. workflow_dispatch stays for manual runs.
+on:
+  repository_dispatch:
+    types: [mods-changed]
+  workflow_dispatch: {}
+
+concurrency:
+  group: publish-mods
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # Keeps the previous 466MB mirror around so only changed jars transfer.
+      - name: Restore mod mirror
+        uses: actions/cache/restore@v4
+        with:
+          path: mods
+          key: mods-${{ hashFiles('manifest.json') }}
+          restore-keys: mods-
+
+      - name: Sync from game server
+        id: sync
+        env:
+          PTERO_PANEL: ${{ vars.PTERO_PANEL }}
+          PTERO_SERVER: ${{ vars.PTERO_SERVER }}
+          PTERO_KEY: ${{ secrets.PTERO_KEY }}
+        run: python3 scripts/sync_mods.py
+
+      - name: Stop here if nothing changed
+        if: steps.sync.outputs.changed != 'true'
+        run: echo "No mod changes; exiting."
+
+      - name: Build password-protected zip
+        if: steps.sync.outputs.changed == 'true'
+        env:
+          ZIP_PASSWORD: ${{ secrets.ZIP_PASSWORD }}
+        run: |
+          # -mx=1: jars are already deflated; compression buys nothing.
+          7z a -tzip -mx=1 -mem=ZipCrypto -p"$ZIP_PASSWORD" \
+            mods-latest.zip ./mods/*.jar >/dev/null
+          ls -lh mods-latest.zip
+
+      - name: Publish release
+        if: steps.sync.outputs.changed == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          TAG="mods-$(date -u +%Y%m%d-%H%M%S)"
+          gh release create "$TAG" \
+            --title "Mods $(date -u +%Y-%m-%d\ %H:%M) UTC" \
+            --notes-file CHANGES.md \
+            mods-latest.zip
+
+      - name: Save mod mirror
+        if: steps.sync.outputs.changed == 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: mods
+          key: mods-${{ hashFiles('manifest.json') }}
+
+      - name: Commit manifest
+        if: steps.sync.outputs.changed == 'true'
+        run: |
+          git config user.name  "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add manifest.json
+          git commit -m "mods: ${{ steps.sync.outputs.count }} jars" || exit 0
+          git push
+
+      # 466MB per release adds up. Keep the most recent few.
+      - name: Prune old releases
+        if: steps.sync.outputs.changed == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release list --limit 100 --json tagName --jq '.[].tagName' \
+            | tail -n +6 \
+            | xargs -r -n1 gh release delete --yes --cleanup-tag
