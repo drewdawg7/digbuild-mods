@@ -16,5 +16,6 @@ javac --release 17 -cp "$CP" -d "$STAGE" \
   src/digbuild/modsync/ModSyncMod.java
 
 cp mods.toml "$STAGE/META-INF/mods.toml"
+cp pack.mcmeta "$STAGE/pack.mcmeta"   # silences "missing metadata in pack" warnings
 jar --create --file "$OUT" -C "$STAGE" .
 echo "built $OUT"

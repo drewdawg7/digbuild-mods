@@ -7,3 +7,8 @@ CHANGES.md
 agent/build/
 agent/modsync-agent.jar
 agent/modsync.properties
+
+# agent build outputs / local-only
+agent/digbuild-modsync-*.jar
+agent/forgelib
+agent/pack.mcmeta
