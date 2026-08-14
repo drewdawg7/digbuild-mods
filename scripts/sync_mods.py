@@ -61,7 +61,8 @@ def remote_listing():
 
 
 def download(name, dest):
-    signed = api("files/download", {"file": f"/mods/{name}"})
+    # PebbleHost's panel expects `file_path`, not stock Pterodactyl's `file`.
+    signed = api("files/download", {"file_path": f"/mods/{name}"})
     url = signed["attributes"]["url"]
     tmp = dest.with_suffix(dest.suffix + ".part")
     with urllib.request.urlopen(url, timeout=TIMEOUT) as r, open(tmp, "wb") as f:
