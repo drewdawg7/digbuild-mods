@@ -1,0 +1,9 @@
+# The mirror is 466MB and lives in the Actions cache, never in git.
+mods/
+mods-latest.zip
+CHANGES.md
+
+# Agent build artifacts and the real (secret-bearing) config.
+agent/build/
+agent/modsync-agent.jar
+agent/modsync.properties

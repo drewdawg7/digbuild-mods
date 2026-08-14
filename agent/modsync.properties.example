@@ -1,0 +1,22 @@
+# Copy to modsync.properties, fill in, upload to /home/container/ via SFTP.
+# This file holds the token and must NOT go in the public repo.
+
+# GitHub repo that receives the trigger, "owner/name".
+github.repo=YOUR_USER/digbuild-mods
+
+# Fine-grained PAT, scoped to that ONE repo, permission: Contents = read/write.
+# If this server is compromised, this token is the entire blast radius.
+github.token=github_pat_xxxxxxxx
+
+# Custom event name; must match the workflow's repository_dispatch type.
+github.event_type=mods-changed
+
+# How often to fingerprint mods/ (seconds). 900 = 15 min.
+interval.seconds=900
+
+# Delay before the first check after boot (seconds).
+first.delay.seconds=30
+
+# Paths inside the container. Defaults are correct for PebbleHost.
+mods.dir=/home/container/mods
+state.file=/home/container/.modsync-hash
