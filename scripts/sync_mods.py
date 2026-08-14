@@ -26,6 +26,10 @@ MODS = pathlib.Path("mods")
 MANIFEST = pathlib.Path("manifest.json")
 TIMEOUT = 120
 
+# Server-only jars that must never reach players' packs (e.g. the modsync mod
+# itself). Matched as a filename prefix.
+EXCLUDE_PREFIXES = ("digbuild-modsync",)
+
 
 def api(path, params=None):
     url = f"{PANEL}/api/client/servers/{SERVER}/{path}"
@@ -48,8 +52,11 @@ def remote_listing():
     out = {}
     for item in api("files/list", {"directory": "/mods"})["data"]:
         a = item["attributes"]
-        if a["name"].lower().endswith(".jar") and a["mime"] != "inode/directory":
-            out[a["name"]] = {"size": a["size"], "modified": a["modified"]}
+        name = a["name"]
+        if name.startswith(EXCLUDE_PREFIXES):
+            continue  # server-only, not distributed
+        if name.lower().endswith(".jar") and a["mime"] != "inode/directory":
+            out[name] = {"size": a["size"], "modified": a["modified"]}
     return out
 
 

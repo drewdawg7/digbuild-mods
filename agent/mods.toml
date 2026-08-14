@@ -1,0 +1,9 @@
+modLoader="javafml"
+loaderVersion="[47,)"
+license="All Rights Reserved"
+
+[[mods]]
+modId="digbuildmodsync"
+version="1.0.0"
+displayName="Digbuild ModSync"
+description="Server-side agent: fingerprints the mods folder and triggers a GitHub publish when it changes. Server-only; not meant for clients."

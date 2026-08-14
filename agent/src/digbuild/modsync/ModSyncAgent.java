@@ -36,6 +36,11 @@ public final class ModSyncAgent {
 
     private static final String UA = "digbuild-modsync-agent";
 
+    /** Forge-mod entry point (called from the @Mod class constructor). */
+    public static void launch(String configPath) {
+        start(configPath);
+    }
+
     /** -javaagent entry point (JVM startup). */
     public static void premain(String args, Instrumentation inst) {
         start(args);
@@ -54,6 +59,11 @@ public final class ModSyncAgent {
 
     private static void start(String configPath) {
         final Properties cfg = loadConfig(configPath);
+
+        // On a shell-less host, stdout may or may not reach latest.log, so mirror
+        // every line to a file we can always read back over SFTP.
+        logFile = Paths.get(cfg.getProperty("log.file", "/home/container/modsync.log"));
+        log("agent starting (config=" + configPath + ")");
 
         final Path modsDir = Paths.get(cfg.getProperty("mods.dir", "/home/container/mods"));
         final Path stateFile = Paths.get(cfg.getProperty("state.file", "/home/container/.modsync-hash"));
@@ -191,8 +201,22 @@ public final class ModSyncAgent {
         return (h == null || h.isEmpty()) ? "none" : h.substring(0, Math.min(8, h.length()));
     }
 
+    private static volatile Path logFile;
+
     private static void log(String msg) {
-        System.out.println("[modsync] " + msg);
+        String line = "[modsync] " + msg;
+        System.out.println(line);
+        Path f = logFile;
+        if (f != null) {
+            try {
+                Files.writeString(f, java.time.Instant.now() + " " + line + "\n",
+                        StandardCharsets.UTF_8,
+                        java.nio.file.StandardOpenOption.CREATE,
+                        java.nio.file.StandardOpenOption.APPEND);
+            } catch (IOException ignored) {
+                // logging must never throw
+            }
+        }
     }
 
     private ModSyncAgent() {}
