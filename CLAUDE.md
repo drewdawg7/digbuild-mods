@@ -177,8 +177,13 @@ IP/port behind `minecraft.abcdefc.gg` is in the PebbleHost panel and is
 deliberately not recorded here — always hand out the hostname, so the
 underlying allocation can change without breaking anyone.
 
+`scripts/setup_cloudflare_map.py` authenticates with `CLOUDFLARE_API_TOKEN`
+from `~/.zshenv`. That token is **DNS-scoped and 403s on every Workers
+endpoint**; the wiki repo deploys with `CLOUDFLARE_WORKERS_TOKEN`, a second
+token in the same file. Keep them separate rather than widening one.
+
 The map is **squaremap** on the second allocation (port 8034), fronted by
-Cloudflare via `scripts/setup_cloudflare_map.py`. It replaced Dynmap, which
+Cloudflare via that script. It replaced Dynmap, which
 replaced BlueMap. Both predecessors failed on this pack for rendering reasons,
 not performance ones: BlueMap smeared meshes, and Dynmap could not convert
 rotated block models — 16,327 `Invalid modellist patch` lines per boot, 96% of
