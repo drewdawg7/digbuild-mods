@@ -62,6 +62,25 @@ MODS_DIR = "/mods"
 CONFIG_DIR = "/dynmap"
 CONFIG_NAME = "configuration.txt"
 
+# BlockScan re-scans every mod's models on every single boot -- its work sits in
+# Forge's serverStarting() hook with no cache check anywhere in the path, and it
+# nulls its assetmap on the way out. Each model whose parent it cannot resolve
+# logs a line, which came to 681 lines (~20s) on this pack.
+#
+# Excluding a module skips it during that scan. The cost is that it is per
+# module, not per model: blocks from these mods that DID resolve lose their
+# definitions too and fall back to flat colour on the map. So this list is only
+# the mods where the noise is high and the blocks are storage/decor that read
+# fine flat. alexscaves (13 lines), tconstruct (2) and darkerdepths (1) are
+# deliberately left in -- too little noise to be worth flattening them.
+BLOCKSCAN_CONFIG = "/config/dynmapblockscan/settings.toml"
+BLOCKSCAN_EXCLUDE = [
+    "minecraft",               # the mod's own default, keep it
+    "sophisticatedstorage",    # 612 of the 681 lines -- limited_*_barrel variants
+    "dungeonsdelight",         # 33
+    "sophisticatedbackpacks",  # 20
+]
+
 # Both jars, and only these, are matched when clearing out old versions.
 JAR_PREFIX = "dynmap"
 
@@ -134,6 +153,20 @@ def configuration(jar, port):
             "the format changed, check it by hand"
         )
     return "\n".join(out) + "\n"
+
+
+def blockscan_settings():
+    """settings.toml in the shape the mod writes it, with our exclude list."""
+    modules = ", ".join(f'"{m}"' for m in BLOCKSCAN_EXCLUDE)
+    return (
+        "#DynmapBlockScan settings\n"
+        "#Managed by scripts/setup_dynmap.py\n"
+        "[settings]\n"
+        "\t#Which modules to exclude\n"
+        f"\texclude_modules = [{modules}]\n"
+        "\t#Which block names to exclude\n"
+        "\texclude_blocknames = []\n"
+    )
 
 
 def installed_jars(p):
@@ -229,6 +262,15 @@ def main(argv=None):
     else:
         print(f"writing {CONFIG_DIR}/{CONFIG_NAME} (webserver-port {port})")
         p.write_file(f"{CONFIG_DIR}/{CONFIG_NAME}", conf)
+
+    # Unlike configuration.txt this one is ours to own -- the mod recreates it
+    # with defaults, so it is rewritten every run rather than left alone.
+    if args.dry_run:
+        print(f"[dry-run] would write {BLOCKSCAN_CONFIG} "
+              f"(exclude {len(BLOCKSCAN_EXCLUDE)} modules)")
+    else:
+        print(f"writing {BLOCKSCAN_CONFIG} (exclude: {', '.join(BLOCKSCAN_EXCLUDE)})")
+        p.write_file(BLOCKSCAN_CONFIG, blockscan_settings())
 
     if not args.dry_run:
         print("\nStaged. Dynmap loads on the next restart:")
