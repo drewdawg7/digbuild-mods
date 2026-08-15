@@ -8,9 +8,21 @@ agent/build/
 agent/modsync-agent.jar
 agent/modsync.properties
 
-# local script caches (bluemap jar download, bytecode)
+# local script caches (map jar downloads, bytecode)
 __pycache__/
 .cache/
+
+# spark output. Heap summaries and profiles are pulled off the server to be
+# read locally; they are megabytes each and their metadata carries the JVM
+# command line, which names the host's internal server id.
+*.sparkheap
+*.sparkprofile
+
+# patch/ build inputs and outputs. lib/ is 14MB of jars pulled off the server
+# to compile against -- build_mod.py re-fetches whatever is missing.
+patch/lib/
+patch/build/
+patch/digbuild-heappatch-*.jar
 
 # agent build outputs / local-only
 agent/digbuild-modsync-*.jar
