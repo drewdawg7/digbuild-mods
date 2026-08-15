@@ -1,13 +1,18 @@
 #!/usr/bin/env python3
-"""Install and configure Dynmap on the digbuild server.
+"""Install and configure Dynmap (+ BlockScan) on the digbuild server.
 
-Dynmap is server-side (side="SERVER") and runs its own webserver, so it needs
-a second port allocation -- the same one map.<zone> is already pointed at by
-scripts/setup_cloudflare_map.py.
+Both mods are server-side (side="SERVER"). Dynmap runs its own webserver, so
+it needs a second port allocation -- the same one map.<zone> is already
+pointed at by scripts/setup_cloudflare_map.py.
+
+BlockScan is what makes a 148-mod pack render as something other than flat
+grey: it walks the installed mods' blockstate/model files and generates the
+render definitions Dynmap needs for blocks it doesn't ship knowledge of. It is
+only published as a dev snapshot for 1.20.1; there is no stable build.
 
 The config is not written from scratch: configuration.txt is pulled out of the
-jar and only the two webserver lines are patched, so every other default stays
-whatever the shipped version says.
+Dynmap jar and only the two webserver lines are patched, so every other
+default stays whatever the shipped version says.
 
 Usage:
   python3 scripts/setup_dynmap.py --status
@@ -26,39 +31,55 @@ import zipfile
 
 from ptero import Panel, PteroError
 
-# Pinned: newest Forge 1.20 build. Dynmap has no stable 1.20.1 release, only
-# the 3.7 betas. Its core is Java 8 bytecode, so the Java 17 runtime here is
-# not a constraint the way it was for BlueMap.
-JAR_NAME = "Dynmap-3.7-beta-6-forge-1.20.jar"
-JAR_URL = (
-    "https://cdn.modrinth.com/data/fRQREgAc/versions/RtI5TFAi/"
-    "Dynmap-3.7-beta-6-forge-1.20.jar"
-)
-JAR_SHA512 = (
-    "e08e993976d51417737267f3478b7a8a7aa73883249dcf5308b441a9aff45868"
-    "2515dc393de5d6be09aeb81ffdee26ed628a210766d9b2df3d1aee509f7206fd"
-)
+# Pinned. Dynmap has no stable 1.20.1 release, only the 3.7 betas, and
+# BlockScan only a snapshot. Both are Java 8/17 bytecode, so the Java 17
+# runtime here is not the constraint it was for BlueMap.
+JARS = [
+    {
+        "name": "Dynmap-3.7-beta-6-forge-1.20.jar",
+        "url": "https://cdn.modrinth.com/data/fRQREgAc/versions/RtI5TFAi/"
+               "Dynmap-3.7-beta-6-forge-1.20.jar",
+        "sha512": "e08e993976d51417737267f3478b7a8a7aa73883249dcf5308b441a9aff45868"
+                  "2515dc393de5d6be09aeb81ffdee26ed628a210766d9b2df3d1aee509f7206fd",
+        "entrypoint": "org/dynmap/DynmapCore.class",
+        "cache": ".cache/dynmap.jar",
+    },
+    {
+        "name": "DynmapBlockScan-3.7-SNAPSHOT-forge-1.20.jar",
+        "url": "https://cdn.modrinth.com/data/L3wHhk2p/versions/8swZ7iRQ/"
+               "DynmapBlockScan-3.7-SNAPSHOT-forge-1.20.jar",
+        "sha512": "d3c4c760910816547bb4c46c6b88119be2454df52136c737c863aea31b2832c3"
+                  "cb382f09bff60f3245d6f65d568786a212a797e2586c97ecd992e920c6ce9552",
+        "entrypoint": "org/dynmapblockscan/core/AbstractBlockScanBase.class",
+        "cache": ".cache/dynmapblockscan.jar",
+    },
+]
 
-ENTRYPOINT_CLASS = "org/dynmap/DynmapCore.class"
-CLASS_MAJOR_OFFSET = 44
+CLASS_MAJOR_OFFSET = 44  # class file major 61 == Java 17
 
 MODS_DIR = "/mods"
 # The modded build reads its config from /dynmap, not /config/dynmap.
 CONFIG_DIR = "/dynmap"
 CONFIG_NAME = "configuration.txt"
 
+# Both jars, and only these, are matched when clearing out old versions.
+JAR_PREFIX = "dynmap"
 
-def fetch_jar(cache):
-    cache = pathlib.Path(cache)
+
+def fetch_jar(spec):
+    cache = pathlib.Path(spec["cache"])
     cache.parent.mkdir(parents=True, exist_ok=True)
-    if cache.exists() and sha512(cache) == JAR_SHA512:
+    if cache.exists() and sha512(cache) == spec["sha512"]:
         return cache
-    print(f"downloading {JAR_NAME}")
-    with urllib.request.urlopen(JAR_URL, timeout=300) as r:
+    print(f"downloading {spec['name']}")
+    with urllib.request.urlopen(spec["url"], timeout=300) as r:
         cache.write_bytes(r.read())
     got = sha512(cache)
-    if got != JAR_SHA512:
-        raise SystemExit(f"hash mismatch: expected {JAR_SHA512[:16]}…, got {got[:16]}…")
+    if got != spec["sha512"]:
+        raise SystemExit(
+            f"hash mismatch for {spec['name']}: "
+            f"expected {spec['sha512'][:16]}…, got {got[:16]}…"
+        )
     return cache
 
 
@@ -70,21 +91,20 @@ def sha512(path):
     return h.hexdigest()
 
 
-def check_java(p, jar):
+def check_java(p, jar, entrypoint, have):
     """Refuse to upload a jar this server's JVM cannot load.
 
     Forge aborts the entire boot on an unloadable mod rather than skipping it,
     so this is worth checking before the upload rather than after the crash.
     """
     with zipfile.ZipFile(jar) as z:
-        needs = int.from_bytes(z.read(ENTRYPOINT_CLASS)[6:8], "big") - CLASS_MAJOR_OFFSET
-    have = p.java_major()
+        needs = int.from_bytes(z.read(entrypoint)[6:8], "big") - CLASS_MAJOR_OFFSET
     if have is None:
         print(f"  ! could not read the server's Java version; jar needs {needs}")
         return
     if needs > have:
         raise SystemExit(
-            f"{JAR_NAME} needs Java {needs} but the server runs Java {have}."
+            f"{jar.name} needs Java {needs} but the server runs Java {have}."
         )
     print(f"  java: server {have}, jar needs {needs} -- ok")
 
@@ -116,12 +136,16 @@ def configuration(jar, port):
     return "\n".join(out) + "\n"
 
 
-def status(p):
-    installed = [
+def installed_jars(p):
+    return [
         e["name"] for e in p.list_dir(MODS_DIR)
-        if e["name"].lower().startswith("dynmap")
+        if e["name"].lower().startswith(JAR_PREFIX)
     ]
-    print(f"jar:         {installed[0] if installed else '(not installed)'}")
+
+
+def status(p):
+    jars = installed_jars(p)
+    print(f"jars:        {', '.join(jars) if jars else '(none installed)'}")
 
     try:
         present = sorted(e["name"] for e in p.list_dir(CONFIG_DIR))
@@ -136,8 +160,7 @@ def status(p):
     except PteroError:
         pass
 
-    allocs = p.allocations()
-    for a in allocs:
+    for a in p.allocations():
         print(f"allocation:  {a['port']} {'(game port)' if a['is_default'] else '(web)'}")
     print(f"state:       {p.state()}, online: {', '.join(p.online_players()) or 'nobody'}")
 
@@ -149,7 +172,6 @@ def main(argv=None):
     ap.add_argument("--force-config", action="store_true",
                     help="overwrite configuration.txt if it already exists")
     ap.add_argument("--dry-run", action="store_true")
-    ap.add_argument("--cache", default=".cache/dynmap.jar")
     args = ap.parse_args(argv)
 
     p = Panel()
@@ -166,14 +188,13 @@ def main(argv=None):
         port = extra[0]["port"]
         print(f"using allocation {port}")
 
-    jar = fetch_jar(args.cache)
-    check_java(p, jar)
+    have_java = p.java_major()
+    jars = {spec["name"]: fetch_jar(spec) for spec in JARS}
+    for spec in JARS:
+        check_java(p, jars[spec["name"]], spec["entrypoint"], have_java)
 
-    present = [
-        e["name"] for e in p.list_dir(MODS_DIR)
-        if e["name"].lower().startswith("dynmap")
-    ]
-    stale = [n for n in present if n != JAR_NAME]
+    present = installed_jars(p)
+    stale = [n for n in present if n not in jars]
     if stale:
         if args.dry_run:
             print(f"[dry-run] would remove {', '.join(stale)}")
@@ -181,15 +202,16 @@ def main(argv=None):
             print(f"removing {', '.join(stale)}")
             p.delete(MODS_DIR, stale)
 
-    if JAR_NAME in present:
-        print("jar already present, skipping upload")
-    elif args.dry_run:
-        print(f"[dry-run] would upload {jar} -> {MODS_DIR}/{JAR_NAME}")
-    else:
-        print(f"uploading {JAR_NAME} -> {MODS_DIR}")
-        p.upload(jar, MODS_DIR, name=JAR_NAME)
+    for name, path in jars.items():
+        if name in present:
+            print(f"{name} already present, skipping upload")
+        elif args.dry_run:
+            print(f"[dry-run] would upload {name}")
+        else:
+            print(f"uploading {name} -> {MODS_DIR}")
+            p.upload(path, MODS_DIR, name=name)
 
-    conf = configuration(jar, port)
+    conf = configuration(jars[JARS[0]["name"]], port)
     try:
         exists = CONFIG_NAME in {e["name"] for e in p.list_dir(CONFIG_DIR)}
     except PteroError:
