@@ -14,61 +14,30 @@ import json
 import os
 import pathlib
 import sys
-import urllib.error
-import urllib.parse
-import urllib.request
 
-PANEL = os.environ["PTERO_PANEL"].rstrip("/")
-SERVER = os.environ["PTERO_SERVER"]
-KEY = os.environ["PTERO_KEY"]
+from ptero import Panel
 
 MODS = pathlib.Path("mods")
 MANIFEST = pathlib.Path("manifest.json")
-TIMEOUT = 120
 
-# Server-only jars that must never reach players' packs (e.g. the modsync mod
-# itself). Matched as a filename prefix.
-EXCLUDE_PREFIXES = ("digbuild-modsync",)
+# Server-only jars that must never reach players' packs. digbuild-modsync is
+# ours; bluemap declares side="SERVER" and would just be dead weight in the
+# client pack.
+EXCLUDE_PREFIXES = ("digbuild-modsync", "bluemap")
 
-
-def api(path, params=None):
-    url = f"{PANEL}/api/client/servers/{SERVER}/{path}"
-    if params:
-        url += "?" + urllib.parse.urlencode(params)
-    req = urllib.request.Request(
-        url,
-        headers={
-            "Authorization": f"Bearer {KEY}",
-            "Accept": "application/json",
-            "User-Agent": "digbuild-mods-sync",
-        },
-    )
-    with urllib.request.urlopen(req, timeout=TIMEOUT) as r:
-        return json.load(r)
+panel = Panel()
 
 
 def remote_listing():
     """name -> {size, modified} for every .jar in /mods."""
     out = {}
-    for item in api("files/list", {"directory": "/mods"})["data"]:
-        a = item["attributes"]
+    for a in panel.list_dir("/mods"):
         name = a["name"]
-        if name.startswith(EXCLUDE_PREFIXES):
+        if name.lower().startswith(EXCLUDE_PREFIXES):
             continue  # server-only, not distributed
-        if name.lower().endswith(".jar") and a["mime"] != "inode/directory":
+        if name.lower().endswith(".jar") and not Panel.is_dir(a):
             out[name] = {"size": a["size"], "modified": a["modified"]}
     return out
-
-
-def download(name, dest):
-    # PebbleHost's panel expects `file_path`, not stock Pterodactyl's `file`.
-    signed = api("files/download", {"file_path": f"/mods/{name}"})
-    url = signed["attributes"]["url"]
-    tmp = dest.with_suffix(dest.suffix + ".part")
-    with urllib.request.urlopen(url, timeout=TIMEOUT) as r, open(tmp, "wb") as f:
-        while chunk := r.read(1 << 20):
-            f.write(chunk)
-    tmp.replace(dest)
 
 
 def emit(**kv):
@@ -112,7 +81,7 @@ def main():
     want |= {n for n in remote if not (MODS / n).exists()}
     for name in sorted(want):
         print(f"  + {name}")
-        download(name, MODS / name)
+        panel.download(f"/mods/{name}", MODS / name)
 
     MANIFEST.write_text(json.dumps(remote, indent=2, sort_keys=True) + "\n")
 
