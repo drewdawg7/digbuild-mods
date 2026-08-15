@@ -1,0 +1,5 @@
+# Mods no longer in the pack. Delete these from your mods folder;
+# extracting the zip cannot remove them for you. Mods you added
+# yourself are not listed here and should be left alone.
+digbuild-dynmappatch-1.0.0.jar
+digbuild-heappatch-1.0.0.jar

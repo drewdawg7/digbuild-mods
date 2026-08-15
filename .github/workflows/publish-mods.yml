@@ -49,6 +49,13 @@ jobs:
           # -mx=1: jars are already deflated; compression buys nothing.
           7z a -tzip -mx=1 -mem=ZipCrypto -p"$ZIP_PASSWORD" \
             mods-latest.zip ./mods/*.jar >/dev/null
+          # Ships beside the mods so it lands in the same extracted folder the
+          # player is already looking at. Encrypted like everything else, or
+          # File Explorer would prompt for the password twice.
+          if [ -f remove-mods.txt ]; then
+            7z a -tzip -mx=1 -mem=ZipCrypto -p"$ZIP_PASSWORD" \
+              mods-latest.zip remove-mods.txt >/dev/null
+          fi
           ls -lh mods-latest.zip
 
       - name: Publish release
@@ -74,7 +81,8 @@ jobs:
         run: |
           git config user.name  "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add manifest.json
+          # -A so a removal that empties the list stages the delete too.
+          git add -A manifest.json remove-mods.txt
           git commit -m "mods: ${{ steps.sync.outputs.count }} jars" || exit 0
           git push
 

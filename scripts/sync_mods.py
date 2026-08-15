@@ -20,6 +20,21 @@ from ptero import Panel
 MODS = pathlib.Path("mods")
 MANIFEST = pathlib.Path("manifest.json")
 
+# Mods dropped from the pack, cumulative across every release.
+#
+# Extracting the zip over an existing mods/ adds and overwrites but never
+# deletes, so a mod removed server-side lingers in players' folders forever.
+# Usually harmless; not always -- digbuild-dynmappatch and digbuild-heappatch
+# both export digbuild.patch, and two modules exporting one package is a JVM
+# ResolutionException before Forge even starts, so the game dies at launch with
+# no mod-loading error to read.
+#
+# Cumulative rather than per-release: a player several releases behind has to
+# see every removal since their last update, not just the newest one. Names are
+# never pruned -- the file is the full history, and deleting a mod you do not
+# have is a no-op.
+REMOVED = pathlib.Path("remove-mods.txt")
+
 # Server-only jars that must never reach players' packs. Listed one by one, not
 # by a "digbuild-" wildcard: digbuild-patches and digbuild-tickpatches are
 # side="BOTH" and carry client rendering mixins, so players need them.
@@ -94,6 +109,25 @@ def main():
         panel.download(f"/mods/{name}", MODS / name)
 
     MANIFEST.write_text(json.dumps(remote, indent=2, sort_keys=True) + "\n")
+
+    # Append this run's removals, minus anything already listed or since
+    # re-added -- a mod that came back must not still read as "delete me".
+    known = [
+        line.strip()
+        for line in (REMOVED.read_text().splitlines() if REMOVED.exists() else [])
+        if line.strip() and not line.startswith("#")
+    ]
+    stale = sorted({*known, *removed} - set(remote))
+    if stale:
+        REMOVED.write_text(
+            "# Mods no longer in the pack. Delete these from your mods folder;\n"
+            "# extracting the zip cannot remove them for you. Mods you added\n"
+            "# yourself are not listed here and should be left alone.\n"
+            + "\n".join(stale)
+            + "\n"
+        )
+    elif REMOVED.exists():
+        REMOVED.unlink()
 
     lines = []
     for n in added:
