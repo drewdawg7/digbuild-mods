@@ -87,6 +87,23 @@ def remote_listing():
     return out
 
 
+def header_is_stale():
+    """True when the published list carries an older header than HEADER.
+
+    The header is player-facing documentation that lives in this script, but
+    publishes are driven by mod changes -- so a correction to the wording would
+    otherwise sit unpublished until someone happened to install a mod, which
+    could be weeks. Treating a stale header as a reason to publish is what makes
+    editing it here actually reach anyone.
+
+    Compares only the commented prefix; the entries are rebuilt further down.
+    """
+    if not REMOVED.exists():
+        return False
+    current = REMOVED.read_text()
+    return not current.startswith(HEADER)
+
+
 def emit(**kv):
     path = os.environ.get("GITHUB_OUTPUT")
     if not path:
@@ -110,7 +127,13 @@ def main():
         n for n in set(remote) & set(old) if remote[n] != old[n]
     )
 
-    if not (added or removed or updated):
+    # A stale header is a publish reason on its own. Falling through to the
+    # normal path rather than short-circuiting is deliberate: that path also
+    # refills the mirror on a cold cache, and the zip step would otherwise be
+    # handed an empty mods/.
+    stale_header = header_is_stale()
+
+    if not (added or removed or updated or stale_header):
         print(f"no changes ({len(remote)} jars)")
         emit(changed="false")
         return 0
@@ -152,6 +175,10 @@ def main():
         lines.append(f"- updated `{n}`")
     for n in removed:
         lines.append(f"- removed `{n}`")
+    if not lines:
+        # Header-only run. The release notes come from this file, and
+        # `gh release create --notes-file` rejects an empty one.
+        lines.append("- updated the notes at the top of `remove-mods.txt`")
     pathlib.Path("CHANGES.md").write_text("\n".join(lines) + "\n")
 
     print(f"{len(added)} added, {len(updated)} updated, {len(removed)} removed")
