@@ -18,6 +18,8 @@ config off the server and inspect it locally):
   python3 scripts/ptero.py get /mods/some.jar ./some.jar
   python3 scripts/ptero.py put ./local.jar /mods
   python3 scripts/ptero.py ports
+  python3 scripts/ptero.py log 200
+  python3 scripts/ptero.py grep 'squaremap|GC|Warn'
 """
 import json
 import mimetypes
@@ -121,6 +123,25 @@ class Panel:
 
     def is_running(self):
         return self.state() == "running"
+
+    def startup(self):
+        """Egg startup command + variables. This is where -Xmx actually lives --
+        it is not echoed into latest.log."""
+        r = self.get("startup")
+        return {
+            "command": r["meta"]["startup_command"],
+            "raw": r["meta"].get("raw_startup_command"),
+            "vars": {
+                v["attributes"]["env_variable"]: v["attributes"]["server_value"]
+                for v in r["data"]
+            },
+        }
+
+    def set_variable(self, key, value):
+        """Set an egg startup variable. Takes effect on the next boot."""
+        return self.request(
+            "startup/variable", method="PUT", body={"key": key, "value": value}
+        )
 
     # --- files ------------------------------------------------------------
 
@@ -259,10 +280,44 @@ class Panel:
         m = re.search(r"java version (\d+)", self.read_file("/logs/latest.log"))
         return int(m.group(1)) if m else None
 
+    def read_large(self, path):
+        """Contents of a file too big for the inline editor endpoint.
+
+        files/contents refuses anything past the panel's editor limit with a
+        400 FileSizeTooLargeException, which latest.log crosses after a few
+        hours of map rendering. files/download has no such limit, so fall
+        back to the signed-url route and keep it all in memory rather than
+        leaving a temp file behind.
+        """
+        signed = self.get("files/download", {"file_path": path})
+        url = signed["attributes"]["url"]
+        req = urllib.request.Request(url, headers={"User-Agent": USER_AGENT})
+        with urllib.request.urlopen(req, timeout=TIMEOUT) as r:
+            return r.read().decode("utf8", "replace")
+
+    def read_text(self, path):
+        """read_file, but transparently handling a file the editor won't open."""
+        try:
+            return self.read_file(path)
+        except PteroError as e:
+            if "FileSizeTooLarge" not in str(e):
+                raise
+            return self.read_large(path)
+
+    def log_lines(self, path="/logs/latest.log"):
+        return self.read_text(path).splitlines()
+
+    def grep_log(self, pattern, path="/logs/latest.log", flags=re.I):
+        """Lines of the log matching `pattern`. The log is fetched whole -- the
+        API has no ranged read -- so prefer one call with an alternation over
+        several narrow ones."""
+        rx = re.compile(pattern, flags)
+        return [ln for ln in self.log_lines(path) if rx.search(ln)]
+
     def online_players(self):
         """Best-effort roster from latest.log -- the panel API does not expose it."""
         online = []
-        for line in self.read_file("/logs/latest.log").splitlines():
+        for line in self.log_lines():
             if " joined the game" in line:
                 online.append(line.rsplit(": ", 1)[-1].replace(" joined the game", ""))
             elif " left the game" in line:
@@ -292,8 +347,29 @@ def _main(argv):
     elif cmd == "ports":
         for a in p.allocations():
             print(a["port"], "default" if a["is_default"] else "extra", a.get("notes") or "")
+    elif cmd == "log":
+        n = int(args[0]) if args else 100
+        print("\n".join(p.log_lines()[-n:]))
+    elif cmd == "grep":
+        print("\n".join(p.grep_log(args[0])))
+    elif cmd == "rm":
+        print(p.delete(args[0], args[1:]))
+    elif cmd == "cmd":
+        # Console command. Output lands in latest.log, not in the response.
+        print(p.send_command(" ".join(args)))
+    elif cmd == "power":
+        # Players may be online -- see CLAUDE.md. Callers ask a human first.
+        print(p.power(args[0]))
     elif cmd == "who":
         print("\n".join(p.online_players()) or "(nobody)")
+    elif cmd == "startup":
+        # -Xms/-Xmx live in the egg, not in latest.log, and a heap that refuses
+        # to shrink is usually an -Xms floor rather than anything in the game.
+        s = p.startup()
+        print(f"command: {s['command']}")
+        print(f"raw:     {s['raw']}")
+        for k, v in sorted(s["vars"].items()):
+            print(f"  {k} = {v!r}")
     else:
         print(f"unknown command: {cmd}", file=sys.stderr)
         return 2
