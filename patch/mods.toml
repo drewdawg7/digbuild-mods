@@ -1,0 +1,37 @@
+modLoader="javafml"
+loaderVersion="[47,)"
+license="All Rights Reserved"
+
+[[mods]]
+modId="digbuildheappatch"
+version="1.0.0"
+displayName="Digbuild Heap Patch"
+description='''Sets the heap sizing flags PebbleHost will not pass, and bounds the vanilla structure template cache. Server-only; nothing here is mod-specific.'''
+
+# Depend on the platform, never on the mod being patched. Forge compares
+# versions with Maven semantics, where a -SNAPSHOT sorts *below* its release and
+# an empty range matches nothing rather than everything -- a dependency that
+# does not match aborts the entire boot rather than disabling one mod.
+#
+# Nothing is lost by leaving it out. Mixins are applied by the class transformer
+# when the target is first loaded, not during mod construction, so load ordering
+# is irrelevant, and the config is "required": false -- a missing target is a
+# logged warning rather than a dead server.
+[[dependencies.digbuildheappatch]]
+    modId="forge"
+    mandatory=true
+    versionRange="[47,)"
+    ordering="NONE"
+    side="SERVER"
+
+[[dependencies.digbuildheappatch]]
+    modId="minecraft"
+    mandatory=true
+    versionRange="[1.20.1,1.20.2)"
+    ordering="NONE"
+    side="SERVER"
+
+# Without this block Forge never reads the config and the mixins silently never
+# apply.
+[[mixins]]
+config="digbuildheappatch.mixins.json"
