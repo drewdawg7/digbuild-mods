@@ -21,9 +21,9 @@ MODS = pathlib.Path("mods")
 MANIFEST = pathlib.Path("manifest.json")
 
 # Server-only jars that must never reach players' packs. digbuild-modsync is
-# ours; bluemap declares side="SERVER" and would just be dead weight in the
+# ours; dynmap declares side="SERVER" and would just be dead weight in the
 # client pack.
-EXCLUDE_PREFIXES = ("digbuild-modsync", "bluemap")
+EXCLUDE_PREFIXES = ("digbuild-modsync", "dynmap")
 
 panel = Panel()
 

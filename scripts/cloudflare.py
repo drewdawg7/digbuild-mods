@@ -184,6 +184,21 @@ class Zone:
         return "created"
 
 
+    def delete_rule(self, phase, ref):
+        """Drop a rule by ref. Returns True if one was there."""
+        ruleset = self.entrypoint(phase)
+        if not ruleset:
+            return False
+        for rule in ruleset.get("rules", []):
+            if rule.get("ref") == ref:
+                self.request(
+                    self.zpath(f"/rulesets/{ruleset['id']}/rules/{rule['id']}"),
+                    "DELETE",
+                )
+                return True
+        return False
+
+
 def _rule_matches(existing, wanted):
     return all(existing.get(k) == v for k, v in wanted.items() if k != "ref")
 

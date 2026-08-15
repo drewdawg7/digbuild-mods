@@ -1,15 +1,15 @@
 #!/usr/bin/env python3
-"""Put BlueMap behind https://map.<zone> instead of a raw ip:port.
+"""Put the web map behind https://map.<zone> instead of a raw ip:port.
 
-BlueMap serves plain HTTP on a high port that Cloudflare's proxy does not
-listen on, so three things are needed and none of them is just a DNS record:
+The map mod serves plain HTTP on a high port that Cloudflare's proxy does
+not listen on, so three things are needed and none of them is just a DNS record:
 
   1. A proxied A record for the hostname -- proxied so the origin ip stays
      hidden and so the two rules below are allowed to apply at all.
-  2. An origin rule rewriting the destination port to BlueMap's allocation.
+  2. An origin rule rewriting the destination port to the map's allocation.
      Without it Cloudflare would connect to the origin on 80/443.
   3. A configuration rule setting SSL mode to "flexible" for this hostname
-     only. BlueMap has no TLS, and scoping it here leaves the wiki's own SSL
+     only. The map mod has no TLS, and scoping it here leaves the wiki's own SSL
      mode alone.
 
 Both rule types are on Cloudflare's free plan (10 rules each).
@@ -32,17 +32,16 @@ SUBDOMAIN = "map"
 
 # Stable rule identifiers -- re-running updates these in place rather than
 # stacking duplicates.
-REF_ORIGIN = "digbuild-bluemap-port"
-REF_CONFIG = "digbuild-bluemap-ssl"
+REF_ORIGIN = "digbuild-map-port"
+REF_CONFIG = "digbuild-map-ssl"
 
 
-def bluemap_allocation(panel):
-    """(ip, port) of the non-default allocation BlueMap's webserver listens on."""
+def map_allocation(panel):
+    """(ip, port) of the non-default allocation the map webserver listens on."""
     extra = [a for a in panel.allocations() if not a["is_default"]]
     if not extra:
         raise SystemExit(
-            "no spare allocation on the server -- claim one first:\n"
-            "  python3 scripts/setup_bluemap.py --claim-port"
+            "no spare allocation on the server -- claim one in the panel first"
         )
     if len(extra) > 1:
         raise SystemExit(
@@ -55,7 +54,7 @@ def bluemap_allocation(panel):
 def origin_rule(host, port):
     return {
         "ref": REF_ORIGIN,
-        "description": "BlueMap webserver port",
+        "description": "web map webserver port",
         "expression": f'http.host eq "{host}"',
         "action": "route",
         "action_parameters": {"origin": {"port": port}},
@@ -66,7 +65,7 @@ def origin_rule(host, port):
 def config_rule(host):
     return {
         "ref": REF_CONFIG,
-        "description": "BlueMap origin speaks plain HTTP",
+        "description": "map origin speaks plain HTTP",
         "expression": f'http.host eq "{host}"',
         "action": "set_config",
         "action_parameters": {"ssl": "flexible"},
@@ -96,7 +95,7 @@ def status(zone, host, port):
         else:
             print(f"{label}:  (not set)")
 
-    print(f"expects: BlueMap listening on port {port}")
+    print(f"expects: the map mod listening on port {port}")
 
 
 def _mask(ip):
@@ -108,7 +107,7 @@ def main(argv=None):
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     ap.add_argument("--zone", help="zone name (default: the token's only zone)")
     ap.add_argument("--subdomain", default=SUBDOMAIN)
-    ap.add_argument("--port", type=int, help="override BlueMap's port")
+    ap.add_argument("--port", type=int, help="override the map webserver's port")
     ap.add_argument("--status", action="store_true")
     ap.add_argument("--dry-run", action="store_true")
     args = ap.parse_args(argv)
@@ -117,7 +116,7 @@ def main(argv=None):
     zone = Zone(args.zone)
     host = f"{args.subdomain}.{zone.name}"
 
-    ip, port = bluemap_allocation(panel)
+    ip, port = map_allocation(panel)
     port = args.port or port
 
     if args.status:
@@ -133,20 +132,24 @@ def main(argv=None):
         return 0
 
     _, verb = zone.upsert_dns_record(
-        host, "A", ip, proxied=True, comment="BlueMap (managed by digbuild-mods)"
+        host, "A", ip, proxied=True, comment="web map (managed by digbuild-mods)"
     )
     print(f"  dns record: {verb}")
+
+    # Rules created before the map mod was swapped carried a mod-specific ref;
+    # drop them so the generic ones below don't sit alongside duplicates.
+    for phase, ref in ((PHASE_ORIGIN, "digbuild-bluemap-port"),
+                       (PHASE_CONFIG, "digbuild-bluemap-ssl")):
+        if zone.delete_rule(phase, ref):
+            print(f"  removed stale rule {ref}")
 
     print(f"  origin rule: {zone.upsert_rule(PHASE_ORIGIN, origin_rule(host, port))}")
     print(f"  config rule: {zone.upsert_rule(PHASE_CONFIG, config_rule(host))}")
 
     print()
     print(f"https://{host} is wired up.")
-    if not panel.exists(f"/mods/bluemap-5.12-mc1.20-6-forge.jar"):
-        print("BlueMap is not installed yet: scripts/setup_bluemap.py")
-    else:
-        print("It will return 522 until the server restarts and BlueMap starts")
-        print("listening -- that is Cloudflare reaching a port nothing is on yet.")
+    print("It returns 521/522 until the server restarts and the map mod starts")
+    print("listening -- that is Cloudflare reaching a port nothing is on yet.")
     return 0
 
 
