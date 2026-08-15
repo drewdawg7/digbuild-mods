@@ -1,8 +1,11 @@
+# Sometimes client-side mods may end up on this list. If your game fails
+# to launch because of a missing mod, just install it normally through
+# CurseForge (or whichever launcher you use).
+#
 # Mods no longer in the pack. Delete these from your mods folder;
 # extracting the zip cannot remove them for you. Mods you added
 # yourself are not listed here and should be left alone.
 Mantle-1.20.1-1.11.104.jar
-Searchables-forge-1.20.1-1.0.3.jar
 TConstruct-1.20.1-3.11.2.166.jar
 digbuild-dynmappatch-1.0.0.jar
 digbuild-heappatch-1.0.0.jar
