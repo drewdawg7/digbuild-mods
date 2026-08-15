@@ -20,10 +20,20 @@ from ptero import Panel
 MODS = pathlib.Path("mods")
 MANIFEST = pathlib.Path("manifest.json")
 
-# Server-only jars that must never reach players' packs. digbuild-modsync is
-# ours; dynmap declares side="SERVER" and would just be dead weight in the
-# client pack.
-EXCLUDE_PREFIXES = ("digbuild-modsync", "dynmap")
+# Server-only jars that must never reach players' packs. Listed one by one, not
+# by a "digbuild-" wildcard: digbuild-patches and digbuild-tickpatches are
+# side="BOTH" and carry client rendering mixins, so players need them.
+# squaremap declares side="BOTH", but only because its command layer is shared;
+# the map itself is a server-side webserver and it is 7.9 MB of dead weight in a
+# client pack. Its displayTest is IGNORE_ALL_VERSION, so clients without it
+# connect fine. spark is universal, but it is a server profiler -- players have
+# no use for it and it only inflates the download.
+EXCLUDE_PREFIXES = (
+    "digbuild-modsync",
+    "digbuild-heappatch",
+    "squaremap",
+    "spark",
+)
 
 panel = Panel()
 
