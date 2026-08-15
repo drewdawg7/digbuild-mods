@@ -35,24 +35,26 @@ MANIFEST = pathlib.Path("manifest.json")
 # have is a no-op.
 REMOVED = pathlib.Path("remove-mods.txt")
 
-# The escape hatch comes first deliberately. The list is derived from what left
-# the server, which is not the same question as what a player can safely delete
-# -- a client-side library the server dropped may still be holding up a mod the
-# player added themselves. That is not hypothetical: deleting Searchables here
-# took out Controlling on every client that followed the instruction. Reading
-# the fix before the list beats working it out from a crash log.
+# What the list is, then what to do when it is wrong. The caveat only parses
+# once the reader knows these are deletions.
+#
+# The caveat earns its place: the list is derived from what left the server,
+# which is not the same question as what a player can safely delete. A
+# client-side library the server dropped may still be holding up a mod the
+# player added themselves -- deleting Searchables here took out Controlling on
+# every client that followed the instruction.
 #
 # Kept in the writer rather than in the file, or CI regenerates the list without
 # it on the next publish. Every line stays commented -- the reader below treats
 # '#' as a comment and would otherwise take these for mod names.
 HEADER = (
-    "# Sometimes client-side mods may end up on this list. If your game fails\n"
-    "# to launch because of a missing mod, just install it normally through\n"
-    "# CurseForge (or whichever launcher you use).\n"
-    "#\n"
     "# Mods no longer in the pack. Delete these from your mods folder;\n"
     "# extracting the zip cannot remove them for you. Mods you added\n"
     "# yourself are not listed here and should be left alone.\n"
+    "#\n"
+    "# Sometimes client-side mods may end up on this list. If your game fails\n"
+    "# to launch because of a missing mod, just install it normally through\n"
+    "# CurseForge (or whichever launcher you use).\n"
 )
 
 # Server-only jars that must never reach players' packs. Listed one by one, not
