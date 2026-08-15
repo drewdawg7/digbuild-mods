@@ -7,6 +7,7 @@
 # CurseForge (or whichever launcher you use).
 Mantle-1.20.1-1.11.104.jar
 TConstruct-1.20.1-3.11.2.166.jar
+darksmelting-forge-1.20.1-1.0.5.jar
 digbuild-dynmappatch-1.0.0.jar
 digbuild-heappatch-1.0.0.jar
 spark-1.10.53-forge.jar
