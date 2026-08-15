@@ -28,20 +28,29 @@ import hashlib
 import pathlib
 import sys
 import urllib.request
+import zipfile
 
 from ptero import Panel, PteroError
 
-# Pinned: 5.12 is the last BlueMap that supports 1.20.x (a backport; mainline
-# moved to 1.21+). Verified against the Modrinth API, loaders=[forge].
-JAR_NAME = "bluemap-5.12-mc1.20-6-forge.jar"
+# Pinned to 5.3, NOT the newer 5.12. 5.12 supports 1.20.x too, but its classes
+# are Java 21 (class file 65) and this server's JVM is Java 17 -- Forge does not
+# skip an unloadable mod, it aborts the entire boot. 5.3 is the newest Forge
+# 1.20 build still compiled for Java 17. Verified against the Modrinth API.
+JAR_NAME = "BlueMap-5.3-forge-1.20.jar"
 JAR_URL = (
-    "https://cdn.modrinth.com/data/swbUV1cr/versions/kC7iYqja/"
-    "bluemap-5.12-mc1.20-6-forge.jar"
+    "https://cdn.modrinth.com/data/swbUV1cr/versions/aHbq9KFB/"
+    "BlueMap-5.3-forge-1.20.jar"
 )
 JAR_SHA512 = (
-    "e3c704792e6fc0243ecc3c7e68aab409b8475ed97b77b1cffa7feaf513e92df2"
-    "b77af139e3c9a14a24eee85009bd855c7e0918d9d1d90024a98b419961054cce"
+    "3885e5085d6475c5d5dbc50d51ed207f5cebbaa1ad4d6eeec02ba56c317ae7b0"
+    "080394ff0732334fd8cdf4d2a6b94506ecb700a4b385fdaf3728f024bf42c14e"
 )
+
+# The class this is checked against -- BlueMap's Forge entrypoint.
+ENTRYPOINT_CLASS = "de/bluecolored/bluemap/forge/ForgeMod.class"
+
+# Class file major 61 == Java 17, 65 == Java 21, and so on.
+CLASS_MAJOR_OFFSET = 44
 
 MODS_DIR = "/mods"
 CONFIG_DIR = "/config/bluemap"
@@ -153,6 +162,28 @@ def fetch_jar(cache):
     return cache
 
 
+def required_java(jar):
+    """Java version the jar's classes need."""
+    with zipfile.ZipFile(jar) as z:
+        major = int.from_bytes(z.read(ENTRYPOINT_CLASS)[6:8], "big")
+    return major - CLASS_MAJOR_OFFSET
+
+
+def check_java(p, jar):
+    """Refuse to upload a jar this server's JVM cannot load."""
+    needs = required_java(jar)
+    have = p.java_major()
+    if have is None:
+        print(f"  ! could not read the server's Java version; jar needs {needs}")
+        return
+    if needs > have:
+        raise SystemExit(
+            f"{JAR_NAME} needs Java {needs} but the server runs Java {have}.\n"
+            "Forge aborts the whole boot on an unloadable mod -- refusing to upload."
+        )
+    print(f"  java: server {have}, jar needs {needs} -- ok")
+
+
 def sha512(path):
     h = hashlib.sha512()
     with open(path, "rb") as f:
@@ -163,7 +194,8 @@ def sha512(path):
 
 def status(p):
     installed = [
-        e["name"] for e in p.list_dir(MODS_DIR) if e["name"].startswith("bluemap")
+        e["name"] for e in p.list_dir(MODS_DIR)
+        if e["name"].lower().startswith("bluemap")
     ]
     print(f"jar:         {installed[0] if installed else '(not installed)'}")
 
@@ -234,9 +266,22 @@ def main(argv=None):
 
     if do_jar:
         jar = fetch_jar(args.cache)
-        already = [e for e in p.list_dir(MODS_DIR) if e["name"] == JAR_NAME]
-        if already:
-            print(f"jar already present ({already[0]['size']} bytes), skipping upload")
+        check_java(p, jar)
+
+        present = [
+            e["name"] for e in p.list_dir(MODS_DIR)
+            if e["name"].lower().startswith("bluemap")
+        ]
+        stale = [n for n in present if n != JAR_NAME]
+        if stale:
+            if args.dry_run:
+                print(f"[dry-run] would remove {', '.join(stale)}")
+            else:
+                print(f"removing {', '.join(stale)}")
+                p.delete(MODS_DIR, stale)
+
+        if JAR_NAME in present:
+            print(f"jar already present, skipping upload")
         elif args.dry_run:
             print(f"[dry-run] would upload {jar} -> {MODS_DIR}/{JAR_NAME}")
         else:

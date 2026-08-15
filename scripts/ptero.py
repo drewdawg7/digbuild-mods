@@ -23,6 +23,7 @@ import json
 import mimetypes
 import os
 import pathlib
+import re
 import sys
 import urllib.error
 import urllib.parse
@@ -219,6 +220,11 @@ class Panel:
             detail = e.read().decode("utf8", "replace")[:400]
             raise PteroError(f"upload {name} -> {e.code}: {detail}") from None
 
+    def delete(self, root, names):
+        return self.request(
+            "files/delete", method="POST", body={"root": root, "files": list(names)}
+        )
+
     def mkdir(self, root, name):
         return self.request(
             "files/create-folder", method="POST", body={"root": root, "name": name}
@@ -243,6 +249,15 @@ class Panel:
 
     def send_command(self, command):
         return self.request("command", method="POST", body={"command": command})
+
+    def java_major(self):
+        """Major Java version of the server JVM, from the boot log.
+
+        Worth checking before uploading any jar: Forge aborts the whole boot if
+        a mod's class files are newer than the runtime, taking the server down.
+        """
+        m = re.search(r"java version (\d+)", self.read_file("/logs/latest.log"))
+        return int(m.group(1)) if m else None
 
     def online_players(self):
         """Best-effort roster from latest.log -- the panel API does not expose it."""
