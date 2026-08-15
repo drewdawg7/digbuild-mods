@@ -35,6 +35,26 @@ MANIFEST = pathlib.Path("manifest.json")
 # have is a no-op.
 REMOVED = pathlib.Path("remove-mods.txt")
 
+# The escape hatch comes first deliberately. The list is derived from what left
+# the server, which is not the same question as what a player can safely delete
+# -- a client-side library the server dropped may still be holding up a mod the
+# player added themselves. That is not hypothetical: deleting Searchables here
+# took out Controlling on every client that followed the instruction. Reading
+# the fix before the list beats working it out from a crash log.
+#
+# Kept in the writer rather than in the file, or CI regenerates the list without
+# it on the next publish. Every line stays commented -- the reader below treats
+# '#' as a comment and would otherwise take these for mod names.
+HEADER = (
+    "# Sometimes client-side mods may end up on this list. If your game fails\n"
+    "# to launch because of a missing mod, just install it normally through\n"
+    "# CurseForge (or whichever launcher you use).\n"
+    "#\n"
+    "# Mods no longer in the pack. Delete these from your mods folder;\n"
+    "# extracting the zip cannot remove them for you. Mods you added\n"
+    "# yourself are not listed here and should be left alone.\n"
+)
+
 # Server-only jars that must never reach players' packs. Listed one by one, not
 # by a "digbuild-" wildcard: digbuild-patches and digbuild-tickpatches are
 # side="BOTH" and carry client rendering mixins, so players need them.
@@ -119,13 +139,7 @@ def main():
     ]
     stale = sorted({*known, *removed} - set(remote))
     if stale:
-        REMOVED.write_text(
-            "# Mods no longer in the pack. Delete these from your mods folder;\n"
-            "# extracting the zip cannot remove them for you. Mods you added\n"
-            "# yourself are not listed here and should be left alone.\n"
-            + "\n".join(stale)
-            + "\n"
-        )
+        REMOVED.write_text(HEADER + "\n".join(stale) + "\n")
     elif REMOVED.exists():
         REMOVED.unlink()
 
