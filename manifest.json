@@ -235,6 +235,10 @@
     "modified": "2026-08-14T00:52:03+00:00",
     "size": 120299
   },
+  "alshanex_familiars-1.20.1_v3.8_HOTFIX.jar": {
+    "modified": "2026-08-15T18:13:45+00:00",
+    "size": 23131109
+  },
   "ancientreforging-1.3.jar": {
     "modified": "2026-08-14T00:52:03+00:00",
     "size": 72515
@@ -291,6 +295,10 @@
     "modified": "2026-08-14T00:52:16+00:00",
     "size": 398066
   },
+  "darkdoppelganger-9.8.2-1.20.1.jar": {
+    "modified": "2026-08-15T18:13:00+00:00",
+    "size": 4482489
+  },
   "darksmelting-forge-1.20.1-1.0.5.jar": {
     "modified": "2026-08-14T00:52:16+00:00",
     "size": 9120
@@ -331,6 +339,10 @@
     "modified": "2026-08-14T00:52:21+00:00",
     "size": 51121
   },
+  "endrem_forge-5.3.3-R-1.20.1.jar": {
+    "modified": "2026-08-15T18:12:55+00:00",
+    "size": 889634
+  },
   "epic-knights-1.20.1-forge-10.11.jar": {
     "modified": "2026-08-14T00:52:23+00:00",
     "size": 2913733
@@ -338,6 +350,10 @@
   "eyesoficeandfire-1.1.0-1.20.1.jar": {
     "modified": "2026-08-14T00:52:24+00:00",
     "size": 18030
+  },
+  "familiarslib-1.20.1-1.6.jar": {
+    "modified": "2026-08-15T18:57:14+00:00",
+    "size": 336013
   },
   "fantasy_armor-forge-1.2.4-1.20.1.jar": {
     "modified": "2026-08-14T00:52:24+00:00",
@@ -410,6 +426,14 @@
   "irons_spellbooks-1.20.1-3.16.2.jar": {
     "modified": "2026-08-14T00:52:32+00:00",
     "size": 15554022
+  },
+  "irons_spells_dynamic_skilltree_1.1.0.jar": {
+    "modified": "2026-08-15T18:12:51+00:00",
+    "size": 254720
+  },
+  "jacks-gravestones-forge-1.20.1-1.0.6.jar": {
+    "modified": "2026-08-15T18:13:45+00:00",
+    "size": 15284
   },
   "jei-1.20.1-forge-15.20.0.112.jar": {
     "modified": "2026-08-14T00:52:32+00:00",
@@ -490,6 +514,18 @@
   "player-animation-lib-forge-1.0.2-rc1+1.20.jar": {
     "modified": "2026-08-14T00:52:46+00:00",
     "size": 181437
+  },
+  "pufferfish_unofficial_additions-1.20.1-2.2.4-all.jar": {
+    "modified": "2026-08-15T18:12:49+00:00",
+    "size": 230329
+  },
+  "puffish_attributes-0.8.2-1.20-forge.jar": {
+    "modified": "2026-08-15T18:12:47+00:00",
+    "size": 237815
+  },
+  "puffish_skills-0.18.3-1.20-forge.jar": {
+    "modified": "2026-08-15T18:12:45+00:00",
+    "size": 615905
   },
   "raccompat-1.20.1-0.1.3.jar": {
     "modified": "2026-08-14T00:52:47+00:00",
