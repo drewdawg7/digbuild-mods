@@ -360,6 +360,15 @@ def _main(argv):
     elif cmd == "power":
         # Players may be online -- see CLAUDE.md. Callers ask a human first.
         print(p.power(args[0]))
+    elif cmd == "mkdir":
+        # `mkdir /world/datapacks pack/data/minecraft` -- the API creates the
+        # whole nested path in one call, so there is no need to walk it.
+        print(p.mkdir(args[0], args[1]))
+    elif cmd == "state":
+        # One line, one API call, exits immediately -- meant for polling a
+        # stop/start from a shell loop rather than trusting a helper that
+        # assumes the transition worked.
+        print(p.state())
     elif cmd == "who":
         print("\n".join(p.online_players()) or "(nobody)")
     elif cmd == "startup":
