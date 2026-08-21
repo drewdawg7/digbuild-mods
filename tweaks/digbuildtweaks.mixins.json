@@ -1,0 +1,13 @@
+{
+  "required": false,
+  "minVersion": "0.8",
+  "package": "digbuild.tweaks.mixin",
+  "compatibilityLevel": "JAVA_17",
+  "mixins": [
+    "CraftingCarryoverMixin",
+    "EnchantmentApplicabilityMixin"
+  ],
+  "injectors": {
+    "defaultRequire": 0
+  }
+}

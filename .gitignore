@@ -24,6 +24,10 @@ patch/lib/
 patch/build/
 patch/digbuild-heappatch-*.jar
 
+# tweaks/ builds against the same patch/lib cache.
+tweaks/build/
+tweaks/digbuild-tweaks-*.jar
+
 # agent build outputs / local-only
 agent/digbuild-modsync-*.jar
 agent/forgelib

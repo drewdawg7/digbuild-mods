@@ -68,6 +68,7 @@ HEADER = (
 EXCLUDE_PREFIXES = (
     "digbuild-modsync",
     "digbuild-heappatch",
+    "digbuild-tweaks",
     "squaremap",
     "spark",
 )

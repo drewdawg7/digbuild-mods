@@ -1,0 +1,31 @@
+modLoader="javafml"
+loaderVersion="[47,)"
+license="All Rights Reserved"
+
+[[mods]]
+modId="digbuildtweaks"
+version="1.0.0"
+displayName="Digbuild Tweaks"
+description='''Server-side gameplay tweaks for this pack, each one config-driven and reloadable without a restart. Currently: widening which items an enchantment may be applied to.'''
+
+# Depend on the platform, never on the mods a tweak happens to touch. A config
+# entry naming something that is not loaded is a warning at boot; a mods.toml
+# dependency that does not match aborts the whole boot.
+[[dependencies.digbuildtweaks]]
+    modId="forge"
+    mandatory=true
+    versionRange="[47,)"
+    ordering="NONE"
+    side="SERVER"
+
+[[dependencies.digbuildtweaks]]
+    modId="minecraft"
+    mandatory=true
+    versionRange="[1.20.1,1.20.2)"
+    ordering="NONE"
+    side="SERVER"
+
+# Without this block Forge never reads the config and the mixins silently never
+# apply.
+[[mixins]]
+config="digbuildtweaks.mixins.json"

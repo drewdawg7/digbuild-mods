@@ -22,6 +22,7 @@ Players connect at **`minecraft.abcdefc.gg`**; the server wiki is at
 | `agent/` | `digbuild-modsync` — a small Forge mod that runs on the game server and fires a `repository_dispatch` when `mods/` changes |
 | `.github/workflows/publish-mods.yml` | Sync → zip → release → prune |
 | `patch/` | `digbuild-heappatch` — a server-only Forge mod carrying fixes that can only be applied from inside the JVM (see **Heap sizing** below) |
+| `tweaks/` | `digbuild-tweaks` — a server-only Forge mod holding this pack's gameplay tweaks, each config-driven and reloadable in place (see **Gameplay tweaks** below) |
 | `scripts/setup_squaremap.py` | Installs/configures the web map |
 | `.claude/docs/` | Mod reference documentation (see below) |
 
@@ -163,6 +164,140 @@ that may be written while running — a supported API, not a trick. It logs the
 value it reads back after each write, so a flag that silently refuses is visible
 rather than assumed. Setting the ratio to 25 took the container from ~5.4 GB to
 ~2.1 GB with no other change.
+
+## Gameplay tweaks
+
+`digbuild-tweaks` is where a gameplay change goes when the thing it changes is
+**code rather than data** and no config in the pack reaches it. Server-only:
+every check these override runs on the server, so players need nothing and the
+jar is excluded from the published pack. Deliberately not more mixins in
+`digbuild-heappatch` — that one is JVM and cache behaviour and would apply to
+any pack; this is specific to ours.
+
+Each tweak is a `Tweak` subclass owning one config file under
+`/config/digbuild-tweaks/`. Adding one means: a class in
+`src/digbuild/tweaks/tweak/`, an entry in `Tweaks.ALL`, and — if it needs a
+mixin — the source in `build_mod.py`'s `SOURCES` and the class in
+`digbuildtweaks.mixins.json`.
+
+**Config edits do not need a restart.** `Tweaks` stats each config file every
+200 ticks and re-runs that tweak when the mtime or size changes, so an edit made
+through the panel is live within about ten seconds and the result — including
+any id nothing registers — is logged. `apply()` must therefore be re-runnable:
+it replaces what the previous call published rather than adding to it. Only
+config is live; changing what a tweak *does* is a rebuild and a restart, because
+mixins are applied by the class transformer when the target class is first
+loaded and cannot be re-applied afterwards.
+
+Build and deploy like the heap patch — `build_mod.py`, `verify_patch.py`, then
+`deploy.py`, which restarts behind a rollback and refuses to run with players
+online.
+
+### enchant-applicability
+
+Which items an enchantment may go on is code on 1.20.1. Vanilla's
+`EnchantmentCategory.WEAPON` is literally `item instanceof SwordItem`, so
+Looting, Fire Aspect, Knockback and every modded enchantment that reuses WEAPON
+— `apotheosis:scavenger` among them — are sword-only by construction. Nothing
+reaches it from outside: no datapack (enchantments only became data-driven in
+1.21), and no config in this pack. Apotheosis' `enchantments.cfg` is per
+enchantment but only covers levels, power, rarity and where it can be obtained.
+
+`/config/digbuild-tweaks/enchant-applicability.properties`:
+
+```
+minecraft:looting = axe, trident
+apotheosis:scavenger = axe, trident
+apotheosis:knowledge = axe, trident
+apotheosis:capturing = axe, trident
+```
+
+Those four are the whole default set, chosen from the 15 `WEAPON`-category
+enchantments in the pack. All four were checked in the jars and read the
+killer's main-hand stack, so they fire from an axe or a melee trident stab.
+Majrusz's enchantments are deliberately excluded: they use a `Predicate` rather
+than an `EnchantmentCategory` and `CustomEnchantment` overrides `canEnchant`, so
+a rule would take at the enchanting table and not at the anvil — and their
+`IS_MELEE` predicate already covers axes.
+
+Targets are either an item-class alias (`axe`, `trident`, `sword`, `pickaxe`,
+`shovel`, `hoe`), which picks up modded items of that class too, or an exact
+item id. Rules only widen, so nothing there can take an enchantment away from an
+item that already accepts it.
+
+**The anvil and the enchanting table do not share a check** — this was traced
+through the server's own jars, and patching only the obvious one puts an
+enchantment on the anvil while leaving it off the table:
+
+| Path | Calls |
+|---|---|
+| anvil, `/enchant` | `Enchantment.canEnchant` (`m_6081_`), whose default is `this.category.canEnchant(item)` |
+| enchanting table | `Enchantment.canApplyAtEnchantingTable` (Forge's own), which bounces through `ItemStack` to `IForgeItem`'s default — and that reads `enchantment.category` **directly**, never `canEnchant` |
+
+So the mixin injects into both, at HEAD, cancelling only with `true`.
+
+Two things it deliberately does not do:
+
+- **It cannot reach an enchantment that overrides those methods.** Vanilla's
+  `DamageEnchantment` is the stock example: it overrides `canEnchant` so axes
+  take Sharpness without any category change. Nothing on the default allowlist
+  overrides either method, and a note is logged if one starts to — otherwise the
+  rule is accepted, logged as active, and silently does nothing.
+- **It only moves the applicability check.** Whether the enchantment then does
+  anything is up to the enchantment. The defaults all read the killer's
+  main-hand stack, so they work from an axe or a melee trident stab, but a
+  thrown trident is not in the hand when the mob dies and no main-hand
+  enchantment applies to the throw. `minecraft:sweeping` is left out for the
+  same reason: its effect is gated on the sweep attack, which Forge grants only
+  to items answering `ToolActions.SWORD_SWEEP`.
+
+The boot log lists every sword-only enchantment on the server, which is where to
+look for more to add rather than unzipping jars.
+
+### craft-carryover
+
+Vanilla builds a crafted item from the recipe alone — `assemble()` is literally
+`this.result.copy()` — and ingredients are matched by item id, NBT ignored. So
+every "consume a vanilla piece to make a modded one" recipe in this pack eats
+whatever the piece was carrying. `armoroftheages:raijin_armor_head` is the case
+that surfaced it: gold + a `minecraft:netherite_helmet`, and an affixed,
+socketed helmet goes in while a plain Raijin helmet comes out.
+
+This tweak copies chosen root NBT keys from an ingredient onto the result.
+Apotheosis keeps affixes, rarity, name, category, socket count and gems in one
+compound, `affix_data`, so that single key is the whole fix and is the default.
+Adding `Enchantments` to `tags` carries those too.
+
+The rolled name comes across with it, which is what you want:
+`affix_data.name` is a *translatable template*, and Apotheosis'
+`ItemStackMixin.apoth_affixItemName` substitutes the stack's own hover name into
+it at render time — so the result reads "Spellshielded **Raijin Helmet** of
+Darkness", not the netherite helmet's name.
+
+Four rules, three of them fixed because each closes a hole:
+
+- the result must be a single item, or one affixed input pays for a whole stack
+- exactly one ingredient may carry the tags; two is ambiguous, so none is copied
+- a tag the result already has is never overwritten
+- `same_slot_only` (configurable, default true) requires source and result to be
+  worn in the same slot. Affix modifiers are rolled for the slot the item was
+  found in, so turning it off is how a sword ends up granting armour. Non-armour
+  all reports as main hand, so weapon-to-weapon still works.
+
+**The injection point is the recipe, not the menu.** FastWorkbench `@Overwrite`s
+`CraftingMenu.slotsChanged` and routes the grid through its own
+`FastBenchUtil.slotChangedCraftingGrid`, so an injector on vanilla's
+`CraftingMenu.slotChangedCraftingGrid` never fires for a crafting table here.
+`ShapedRecipe`/`ShapelessRecipe.assemble` is upstream of all of it — vanilla
+menus, FastWorkbench, JEI transfer, automation — and the result slot previews
+what it returns, so the affixes are visible before the craft rather than
+appearing on take. Both types return `this.result.copy()`, so mutating the
+returned stack cannot touch the recipe's own template. The bridge overload
+taking a plain `Container` is deliberately not targeted; hooking both would
+apply the carryover twice.
+
+Note this is a balance decision, not just a fix: it makes every such recipe an
+upgrade path rather than a sink, pack-wide.
 
 ## Public addresses
 
