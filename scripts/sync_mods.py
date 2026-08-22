@@ -73,10 +73,7 @@ EXCLUDE_PREFIXES = (
     "spark",
 )
 
-panel = Panel()
-
-
-def remote_listing():
+def remote_listing(panel):
     """name -> {size, modified} for every .jar in /mods."""
     out = {}
     for a in panel.list_dir("/mods"):
@@ -115,7 +112,12 @@ def emit(**kv):
 
 
 def main():
-    remote = remote_listing()
+    # Constructed here rather than at import: publish_manifest.py imports
+    # EXCLUDE_PREFIXES from this module and has no business needing panel
+    # credentials to read a tuple.
+    panel = Panel()
+
+    remote = remote_listing(panel)
     if not remote:
         print("refusing to continue: remote listing is empty", file=sys.stderr)
         return 1
