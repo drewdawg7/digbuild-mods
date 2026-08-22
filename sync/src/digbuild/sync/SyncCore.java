@@ -8,24 +8,22 @@ import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.nio.charset.StandardCharsets;
-import java.nio.file.DirectoryStream;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.StandardCopyOption;
-import java.security.MessageDigest;
 import java.util.ArrayList;
-import java.util.LinkedHashMap;
-import java.util.LinkedHashSet;
 import java.util.List;
-import java.util.Map;
-import java.util.Set;
+import java.util.Properties;
+import java.util.zip.CRC32;
 
 /**
- * Brings mods/ into line with the published manifest.
+ * Downloads the published pack zip and extracts what the player is missing.
  *
- * Runs from DigbuildSyncService before Forge has looked at the folder, which is
- * what makes an update land on the launch that downloads it instead of the one
- * after. Two consequences worth keeping in mind when editing this:
+ * The zip is what the pipeline already produces and what the wiki already hands
+ * out; this reads the same file, so nothing about publishing changes. Runs from
+ * DigbuildSyncService before Forge has looked at mods/, which is what makes an
+ * update land on the launch that downloads it rather than the one after. Two
+ * consequences worth keeping in mind when editing this:
  *
  *   - nothing here may touch a Minecraft or Forge class. The game's class
  *     loader does not exist yet; this is stdlib only, and that is a constraint
@@ -38,25 +36,25 @@ import java.util.Set;
  * exercises it without a Minecraft install.
  */
 public final class SyncCore {
-    /** Downloads land here first, so a half-written jar is never in mods/. */
+    /** The download and the extraction land here first, never in mods/ directly. */
     private static final String STAGING = ".digbuild-sync";
-
-    /** Where a jar the player added goes when it cannot stay. Never deleted. */
-    private static final String DISABLED = ".digbuild-sync-disabled";
 
     /**
      * This jar does not update itself.
      *
      * By the time any of this runs, its own jar is open on the boot layer --
      * replacing it is impossible on Windows and pointless everywhere else,
-     * since the old class is already loaded. Downloading a renamed newer copy
+     * since the old class is already loaded. Extracting a renamed newer copy
      * would be worse: both would declare the service and both would run.
      *
      * So a new digbuild-sync reaches players the way the first one did, in the
-     * pack zip from the wiki. Matched by prefix rather than by the running
-     * file's name so a version bump is covered too.
+     * pack zip they downloaded by hand. Matched by prefix rather than by the
+     * running file's name so a version bump is covered too.
      */
     private static final String SELF_PREFIX = "digbuild-sync";
+
+    /** The pack ships its own list of what to delete. */
+    private static final String REMOVALS = "remove-mods.txt";
 
     private final Path gameDir;
     private final Path modsDir;
@@ -85,280 +83,186 @@ public final class SyncCore {
             return;
         }
 
-        Manifest manifest;
-        try {
-            manifest = Manifest.parse(fetch(config.manifestUrl));
-        } catch (Exception e) {
-            // Offline is the common case here, and a player who cannot reach
-            // GitHub should still be able to launch and play single-player.
-            log.warn("could not read the manifest; leaving mods/ alone", e);
-            return;
-        }
-        log.info("manifest lists " + manifest.byName().size() + " mods");
-
-        LocalState state = LocalState.load(gameDir, log);
-        Map<String, Path> local = listJars();
-
-        // First run adopts the jars that came out of the zip -- anything the
-        // manifest also names. A jar the player added is left unmanaged, and
-        // unmanaged means never deleted for being absent from the manifest.
-        if (state.isFirstRun()) {
-            int adopted = 0;
-            for (String name : local.keySet()) {
-                if (manifest.byName().containsKey(name)) {
-                    state.manage(name);
-                    adopted++;
-                }
-            }
-            log.info("first run: adopted " + adopted + " of " + local.size() + " jars in mods/");
-        }
-
-        List<Manifest.Entry> wanted = new ArrayList<>();
-        for (Manifest.Entry entry : manifest.byName().values()) {
-            if (isSelf(entry.name())) continue;
-            Path path = local.get(entry.name());
-            if (path == null || !entry.sha1().equals(hash(path, entry.name(), state))) {
-                wanted.add(entry);
-            }
-        }
-
-        // Managed jars the manifest no longer names: this pack removed them.
-        List<String> dropped = new ArrayList<>();
-        if (config.removeDropped) {
-            for (String name : state.managed()) {
-                if (isSelf(name)) continue;
-                if (!manifest.byName().containsKey(name) && local.containsKey(name)) {
-                    dropped.add(name);
-                }
-            }
-        }
-
-        if (wanted.isEmpty() && dropped.isEmpty()) {
-            log.info("mods/ already matches the manifest");
-            state.save(local.keySet(), log);
-            return;
-        }
-
-        long bytes = wanted.stream().mapToLong(Manifest.Entry::size).sum();
-        log.info("%d to download (%d MB), %d to remove"
-                .formatted(wanted.size(), bytes / (1024 * 1024), dropped.size()));
-
-        Progress progress = Progress.open(wanted.size(), bytes, config.progressWindow);
-        try {
-            install(wanted, bytes, local, state, progress);
-            for (String name : dropped) {
-                remove(local.get(name), "dropped from the pack");
-                state.unmanage(name);
-            }
-        } finally {
-            progress.close();
-        }
-        state.save(listJars().keySet(), log);
-    }
-
-    /** Downloads, verifies, then moves into place -- one jar at a time. */
-    private void install(List<Manifest.Entry> wanted, long totalBytes, Map<String, Path> local,
-                         LocalState state, Progress progress) {
         Path staging = modsDir.resolve(STAGING);
-        long done = 0;
-
-        for (Manifest.Entry entry : wanted) {
-            progress.update(entry.name(), done, totalBytes);
-            Path tmp = staging.resolve(entry.name() + ".part");
-            try {
-                Files.createDirectories(staging);
-                download(entry, tmp);
-
-                String got = sha1(tmp);
-                if (!got.equals(entry.sha1())) {
-                    // A truncated or tampered jar is worse than a missing one:
-                    // Forge would fail to read it and abort the boot.
-                    throw new IOException("sha1 mismatch: expected " + entry.sha1() + ", got " + got);
-                }
-
-                // Before it lands: clear any jar declaring the same mod id. A
-                // version bump changes the filename, so the old one is not
-                // "dropped" by name and would otherwise duplicate the mod id.
-                for (String stale : collisions(tmp, entry.name(), local)) {
-                    // Ours to delete only if we installed it. A jar the player
-                    // added is moved aside instead: it cannot stay -- Forge
-                    // aborts the boot on a duplicate mod id -- but deleting
-                    // someone's own mod to fix our own upgrade is not on.
-                    if (state.managed().contains(stale)) {
-                        remove(local.get(stale), "replaced by " + entry.name());
-                    } else {
-                        quarantine(local.get(stale), entry.name());
-                    }
-                    state.unmanage(stale);
-                    local.remove(stale);
-                }
-
-                Path dest = modsDir.resolve(entry.name());
-                Files.move(tmp, dest, StandardCopyOption.REPLACE_EXISTING);
-                state.manage(entry.name());
-                state.rememberHash(entry.name(), Files.size(dest),
-                        Files.getLastModifiedTime(dest).toMillis(), entry.sha1());
-                local.put(entry.name(), dest);
-                log.info("installed " + entry.name());
-            } catch (Exception e) {
-                // Keep going: one unreachable jar should cost that mod, not the
-                // other 147. The next launch retries it.
-                log.warn("could not install " + entry.name(), e);
-                try {
-                    Files.deleteIfExists(tmp);
-                } catch (IOException ignored) {
-                }
-            }
-            done += entry.size();
-        }
-
+        Path zip = staging.resolve("pack.zip");
+        Progress progress = null;
         try {
-            Files.deleteIfExists(staging);  // only succeeds when nothing was left behind
-        } catch (IOException ignored) {
-        }
-    }
+            Files.createDirectories(staging);
 
-    /**
-     * Local jars sharing a mod id with the staged one.
-     *
-     * Deliberately checks ids rather than names, and deliberately applies to
-     * unmanaged jars too: a stale copy of a pack mod is a boot failure whoever
-     * put it there, and remove_dropped=false turns the whole behaviour off.
-     */
-    private Set<String> collisions(Path staged, String name, Map<String, Path> local) {
-        Set<String> out = new LinkedHashSet<>();
-        if (!config.removeDropped) return out;
-
-        Set<String> ids = ModIds.of(staged);
-        if (ids.isEmpty()) return out;
-
-        for (Map.Entry<String, Path> e : local.entrySet()) {
-            if (e.getKey().equals(name)) continue;  // same file, being replaced in place
-            if (isSelf(e.getKey())) continue;
-            if (!java.util.Collections.disjoint(ModIds.of(e.getValue()), ids)) {
-                out.add(e.getKey());
-            }
-        }
-        return out;
-    }
-
-    private static boolean isSelf(String name) {
-        return name.startsWith(SELF_PREFIX);
-    }
-
-    private void download(Manifest.Entry entry, Path dest) throws IOException, InterruptedException {
-        IOException last = null;
-        for (int attempt = 1; attempt <= 3; attempt++) {
-            try {
-                HttpRequest req = HttpRequest.newBuilder(URI.create(entry.url()))
-                        .timeout(config.timeout)
-                        .header("User-Agent", "digbuild-sync")
-                        .build();
-                HttpResponse<InputStream> res =
-                        http.send(req, HttpResponse.BodyHandlers.ofInputStream());
-                if (res.statusCode() != 200) {
-                    throw new IOException("HTTP " + res.statusCode() + " for " + entry.url());
-                }
-                try (InputStream in = res.body(); OutputStream out = Files.newOutputStream(dest)) {
-                    in.transferTo(out);
-                }
+            String tag = download(zip);
+            if (tag == null) {
+                log.info("pack is unchanged since the last launch");
                 return;
-            } catch (IOException e) {
-                last = e;
-                log.info("retrying " + entry.name() + " (attempt " + attempt + " failed)");
+            }
+
+            progress = Progress.open(config.progressWindow);
+            extract(zip, progress);
+            rememberTag(tag);
+        } catch (Exception e) {
+            // Offline is the common case, and a player who cannot reach GitHub
+            // should still be able to launch and play.
+            log.warn("could not update the pack; leaving mods/ alone", e);
+        } finally {
+            if (progress != null) progress.close();
+            try {
+                Files.deleteIfExists(zip);
+                Files.deleteIfExists(staging);
+            } catch (IOException ignored) {
             }
         }
-        throw last;
     }
 
     /**
-     * Moves a jar out of mods/ into mods/.digbuild-sync-disabled/.
+     * Fetches the pack, or returns null when there is nothing new.
      *
-     * The one case: the player installed their own copy of a mod the pack also
-     * ships, and the pack's copy is a different version. Both cannot sit in
-     * mods/, and the pack's has to win or the server rejects them -- but the
-     * file is theirs, so it is set aside rather than destroyed and the log says
-     * where it went.
+     * The zip is hundreds of megabytes and most launches change nothing, so the
+     * ETag of the last one that was extracted is sent back as If-None-Match and
+     * an unchanged pack costs one request that returns 304 and no body.
      */
-    private void quarantine(Path jar, String replacedBy) {
-        if (jar == null) return;
-        try {
-            Path parked = modsDir.resolve(DISABLED);
-            Files.createDirectories(parked);
-            Files.move(jar, parked.resolve(jar.getFileName().toString()),
-                    StandardCopyOption.REPLACE_EXISTING);
-            log.info("moved " + jar.getFileName() + " to mods/" + DISABLED
-                    + " -- it declares the same mod id as " + replacedBy);
-        } catch (IOException e) {
-            log.warn("could not move " + jar.getFileName() + " aside", e);
-        }
-    }
-
-    private void remove(Path jar, String why) {
-        if (jar == null) return;
-        try {
-            Files.deleteIfExists(jar);
-            log.info("removed " + jar.getFileName() + " -- " + why);
-        } catch (IOException e) {
-            log.warn("could not remove " + jar.getFileName(), e);
-        }
-    }
-
-    private Map<String, Path> listJars() {
-        Map<String, Path> out = new LinkedHashMap<>();
-        // Non-recursive on purpose: .digbuild-sync-disabled/ lives under mods/
-        // and its contents are explicitly not part of the pack.
-        try (DirectoryStream<Path> jars = Files.newDirectoryStream(modsDir, "*.jar")) {
-            for (Path jar : jars) {
-                if (Files.isRegularFile(jar)) out.put(jar.getFileName().toString(), jar);
-            }
-        } catch (IOException e) {
-            log.warn("could not list " + modsDir, e);
-        }
-        return out;
-    }
-
-    /** Cached by size and mtime, so an unchanged pack costs one stat per jar. */
-    private String hash(Path jar, String name, LocalState state) {
-        try {
-            long size = Files.size(jar);
-            long mtime = Files.getLastModifiedTime(jar).toMillis();
-            String cached = state.cachedHash(name, size, mtime);
-            if (cached != null) return cached;
-
-            String sha1 = sha1(jar);
-            state.rememberHash(name, size, mtime, sha1);
-            return sha1;
-        } catch (IOException e) {
-            log.warn("could not hash " + name, e);
-            return "";  // treated as a mismatch, so it is re-downloaded
-        }
-    }
-
-    private static String sha1(Path file) throws IOException {
-        try {
-            MessageDigest digest = MessageDigest.getInstance("SHA-1");
-            byte[] buffer = new byte[1 << 16];
-            try (InputStream in = Files.newInputStream(file)) {
-                for (int n; (n = in.read(buffer)) > 0; ) digest.update(buffer, 0, n);
-            }
-            StringBuilder sb = new StringBuilder(40);
-            for (byte b : digest.digest()) sb.append(Character.forDigit((b >> 4) & 0xf, 16))
-                    .append(Character.forDigit(b & 0xf, 16));
-            return sb.toString();
-        } catch (java.security.NoSuchAlgorithmException e) {
-            throw new IOException("no SHA-1 in this JVM", e);
-        }
-    }
-
-    private String fetch(String url) throws IOException, InterruptedException {
-        HttpRequest req = HttpRequest.newBuilder(URI.create(url))
+    private String download(Path dest) throws IOException, InterruptedException {
+        HttpRequest.Builder req = HttpRequest.newBuilder(URI.create(config.packUrl))
                 .timeout(config.timeout)
-                .header("User-Agent", "digbuild-sync")
-                .build();
-        HttpResponse<byte[]> res = http.send(req, HttpResponse.BodyHandlers.ofByteArray());
-        if (res.statusCode() != 200) throw new IOException("HTTP " + res.statusCode() + " for " + url);
-        return new String(res.body(), StandardCharsets.UTF_8);
+                .header("User-Agent", "digbuild-sync");
+
+        String seen = lastTag();
+        if (seen != null && !seen.isEmpty()) req.header("If-None-Match", seen);
+
+        log.info("checking " + config.packUrl);
+        HttpResponse<InputStream> res = http.send(req.build(), HttpResponse.BodyHandlers.ofInputStream());
+        try (InputStream in = res.body()) {
+            if (res.statusCode() == 304) return null;
+            if (res.statusCode() != 200) throw new IOException("HTTP " + res.statusCode());
+
+            long length = res.headers().firstValueAsLong("Content-Length").orElse(-1);
+            log.info("downloading the pack" + (length > 0 ? " (" + length / (1024 * 1024) + " MB)" : ""));
+            try (OutputStream out = Files.newOutputStream(dest)) {
+                in.transferTo(out);
+            }
+        }
+        // No ETag is not an error; it just means the next launch downloads again.
+        return res.headers().firstValue("ETag").orElse("");
+    }
+
+    /** Writes every jar the player does not already have, byte for byte. */
+    private void extract(Path zip, Progress progress) throws IOException {
+        try (EncryptedZip pack = EncryptedZip.open(zip)) {
+            List<EncryptedZip.Entry> jars = new ArrayList<>();
+            EncryptedZip.Entry removals = null;
+
+            for (EncryptedZip.Entry entry : pack.entries()) {
+                String name = fileName(entry.name());
+                if (name.equals(REMOVALS)) {
+                    removals = entry;
+                } else if (name.endsWith(".jar") && !name.startsWith(SELF_PREFIX)) {
+                    jars.add(entry);
+                }
+            }
+            log.info("pack contains " + jars.size() + " mods");
+
+            int written = 0;
+            for (int i = 0; i < jars.size(); i++) {
+                EncryptedZip.Entry entry = jars.get(i);
+                String name = fileName(entry.name());
+                progress.update(name, i, jars.size());
+
+                if (matches(modsDir.resolve(name), entry)) continue;
+
+                Path tmp = zip.resolveSibling(name + ".part");
+                Files.write(tmp, pack.contents(entry, config.password));
+                Files.move(tmp, modsDir.resolve(name), StandardCopyOption.REPLACE_EXISTING);
+                log.info("installed " + name);
+                written++;
+            }
+
+            log.info(written == 0 ? "every mod was already up to date"
+                                  : "installed " + written + " mod" + (written == 1 ? "" : "s"));
+
+            if (removals != null) {
+                applyRemovals(new String(pack.contents(removals, config.password),
+                        StandardCharsets.UTF_8));
+            }
+        }
+    }
+
+    /**
+     * Deletes the mods the pack says to delete.
+     *
+     * remove-mods.txt is the list the pipeline already maintains and the wiki
+     * already tells players to action by hand -- extracting a zip adds and
+     * overwrites but never removes, and a mod left behind is sometimes a boot
+     * failure rather than dead weight. Only names on that list are touched, so
+     * a mod the player added themselves is never one of them.
+     */
+    private void applyRemovals(String listing) {
+        int removed = 0;
+        for (String line : listing.split("\\R")) {
+            String name = line.trim();
+            if (name.isEmpty() || name.startsWith("#")) continue;
+            if (name.startsWith(SELF_PREFIX)) continue;
+
+            Path jar = modsDir.resolve(fileName(name));
+            if (!Files.isRegularFile(jar)) continue;
+            try {
+                Files.delete(jar);
+                log.info("removed " + name + " -- dropped from the pack");
+                removed++;
+            } catch (IOException e) {
+                log.warn("could not remove " + name, e);
+            }
+        }
+        if (removed > 0) log.info("removed " + removed + " mod" + (removed == 1 ? "" : "s"));
+    }
+
+    /** True when the file on disk is already exactly this entry. */
+    private boolean matches(Path jar, EncryptedZip.Entry entry) {
+        try {
+            if (!Files.isRegularFile(jar) || Files.size(jar) != entry.size()) return false;
+
+            // Size alone would miss a rebuilt jar of identical length, and the
+            // zip carries a CRC for every entry, so the comparison is free of
+            // any extra bookkeeping on our side.
+            CRC32 crc = new CRC32();
+            byte[] buffer = new byte[1 << 16];
+            try (InputStream in = Files.newInputStream(jar)) {
+                for (int n; (n = in.read(buffer)) > 0; ) crc.update(buffer, 0, n);
+            }
+            return crc.getValue() == entry.crc();
+        } catch (IOException e) {
+            return false;  // unreadable: treat as missing and rewrite it
+        }
+    }
+
+    /** Zip entries may carry a directory prefix; mods/ is flat. */
+    private static String fileName(String entryName) {
+        int slash = entryName.lastIndexOf('/');
+        return slash < 0 ? entryName : entryName.substring(slash + 1);
+    }
+
+    private Path tagFile() {
+        return gameDir.resolve("config").resolve("digbuild-sync-state.properties");
+    }
+
+    private String lastTag() {
+        Properties p = new Properties();
+        try (InputStream in = Files.newInputStream(tagFile())) {
+            p.load(in);
+        } catch (IOException e) {
+            return null;  // first launch, or the file was cleared to force a refetch
+        }
+        return p.getProperty("etag");
+    }
+
+    private void rememberTag(String tag) {
+        Properties p = new Properties();
+        p.setProperty("etag", tag);
+        try {
+            Files.createDirectories(tagFile().getParent());
+            try (OutputStream out = Files.newOutputStream(tagFile())) {
+                p.store(out, "written by digbuild-sync -- delete this to force a full re-check");
+            }
+        } catch (IOException e) {
+            log.warn("could not record the pack version; the next launch will re-download", e);
+        }
     }
 
     /** Standalone entry point: java -cp ... digbuild.sync.SyncCore <gamedir> */

@@ -73,7 +73,10 @@ EXCLUDE_PREFIXES = (
     "spark",
 )
 
-def remote_listing(panel):
+panel = Panel()
+
+
+def remote_listing():
     """name -> {size, modified} for every .jar in /mods."""
     out = {}
     for a in panel.list_dir("/mods"):
@@ -112,12 +115,7 @@ def emit(**kv):
 
 
 def main():
-    # Constructed here rather than at import: publish_manifest.py imports
-    # EXCLUDE_PREFIXES from this module and has no business needing panel
-    # credentials to read a tuple.
-    panel = Panel()
-
-    remote = remote_listing(panel)
+    remote = remote_listing()
     if not remote:
         print("refusing to continue: remote listing is empty", file=sys.stderr)
         return 1
@@ -136,12 +134,12 @@ def main():
     # handed an empty mods/.
     stale_header = header_is_stale()
 
-    MODS.mkdir(exist_ok=True)
+    if not (added or removed or updated or stale_header):
+        print(f"no changes ({len(remote)} jars)")
+        emit(changed="false")
+        return 0
 
-    # The mirror is brought level on every run, before the decision below --
-    # the client manifest is generated from these bytes, and digbuild-sync asks
-    # for it on every launch, so it has to be publishable whether or not a mod
-    # changed today. On a warm cache with nothing new this costs nothing.
+    MODS.mkdir(exist_ok=True)
 
     # Drop anything the server no longer has, plus stale local extras.
     for f in MODS.glob("*.jar"):
@@ -155,12 +153,6 @@ def main():
     for name in sorted(want):
         print(f"  + {name}")
         panel.download(f"/mods/{name}", MODS / name)
-
-    # Only the release is gated on a change. The manifest step is not.
-    if not (added or removed or updated or stale_header):
-        print(f"no changes ({len(remote)} jars)")
-        emit(changed="false")
-        return 0
 
     MANIFEST.write_text(json.dumps(remote, indent=2, sort_keys=True) + "\n")
 

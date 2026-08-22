@@ -8,10 +8,12 @@ have Forge find them on the same launch. ModsFolderLocator then skips it
 (allExcluded), which is why there is no mods.toml here and why Forge does not
 complain about its absence.
 
-Ships to players inside the pack, so it is *not* in sync_mods.py's
-EXCLUDE_PREFIXES -- the opposite of every other digbuild jar. It lives in the
-game server's mods/ too, purely so the existing publish pipeline carries it;
-DigbuildSyncService checks LAUNCHTARGET and does nothing server-side.
+It downloads the published pack zip and extracts what the player is missing, so
+nothing about how the pack is published had to change. Ships inside that zip,
+which is why it is *not* in sync_mods.py's EXCLUDE_PREFIXES -- the opposite of
+every other digbuild jar. It sits in the game server's mods/ purely so the
+existing pipeline carries it; DigbuildSyncService checks LAUNCHTARGET and does
+nothing server-side.
 
 Compile-only deps come from the game server's own libraries, cached in ./lib.
 joptsimple and securejarhandler are there for javac's benefit only: they appear
@@ -52,9 +54,7 @@ SOURCES = (
     "src/digbuild/sync/SyncCore.java",
     "src/digbuild/sync/SyncConfig.java",
     "src/digbuild/sync/SyncLog.java",
-    "src/digbuild/sync/LocalState.java",
-    "src/digbuild/sync/Manifest.java",
-    "src/digbuild/sync/ModIds.java",
+    "src/digbuild/sync/EncryptedZip.java",
     "src/digbuild/sync/Progress.java",
 )
 

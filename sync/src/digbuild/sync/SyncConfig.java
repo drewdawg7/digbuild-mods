@@ -19,14 +19,12 @@ import java.util.Properties;
 final class SyncConfig {
     static final String FILE = "digbuild-sync.properties";
 
-    /**
-     * A fixed URL, deliberately not the /latest/ redirect: this is asked on
-     * every launch, so the answer has to exist even when the pack has not
-     * published a release in weeks. mod-store is the one release that is never
-     * pruned, and the manifest is replaced in place each time it is rebuilt.
-     */
-    private static final String DEFAULT_MANIFEST =
-            "https://github.com/drewdawg7/digbuild-mods/releases/download/mod-store/mods-manifest.tsv";
+    /** The same file, and the same link, the wiki's install page hands out. */
+    private static final String DEFAULT_PACK =
+            "https://github.com/drewdawg7/digbuild-mods/releases/latest/download/mods-latest.zip";
+
+    /** Printed on the wiki's install page; not a secret, just packaging. */
+    private static final String DEFAULT_PASSWORD = "digbuild-lfxwgd";
 
     private static final String TEMPLATE = """
             # digbuild-sync -- pulls new mods at launch, before Forge reads mods/.
@@ -36,36 +34,31 @@ final class SyncConfig {
             # way it did before this jar existed.
             enabled = true
 
-            # Where the published mod list lives. Points at the newest release
-            # of drewdawg7/digbuild-mods; change it only to test against another.
-            manifest = %s
+            # The pack itself -- the same download the wiki hands out, and the
+            # password printed on the same page. Change these only to test
+            # against another pack.
+            pack = %s
+            password = %s
 
-            # Clean up jars the pack no longer uses. Deletes only files this
-            # jar installed itself. A mod you installed that clashes with a pack
-            # mod -- same mod id, different version -- is moved into
-            # mods/.digbuild-sync-disabled/ instead, because Forge will not boot
-            # with both; nothing you added is ever deleted.
-            remove_dropped = true
-
-            # Seconds to wait on the manifest fetch and on each jar. A slow
-            # connection should hold up the boot; a dead host should not.
+            # Seconds to wait on the download. A slow connection should hold up
+            # the boot; a dead host should not.
             timeout_seconds = 60
 
             # Show a progress window while downloading. Off means the boot just
             # appears to take longer, so leave it on unless it misbehaves.
             progress_window = true
-            """.formatted(DEFAULT_MANIFEST);
+            """.formatted(DEFAULT_PACK, DEFAULT_PASSWORD);
 
     final boolean enabled;
-    final String manifestUrl;
-    final boolean removeDropped;
+    final String packUrl;
+    final String password;
     final Duration timeout;
     final boolean progressWindow;
 
     private SyncConfig(Properties p) {
         this.enabled = bool(p, "enabled", true);
-        this.manifestUrl = p.getProperty("manifest", DEFAULT_MANIFEST).trim();
-        this.removeDropped = bool(p, "remove_dropped", true);
+        this.packUrl = p.getProperty("pack", DEFAULT_PACK).trim();
+        this.password = p.getProperty("password", DEFAULT_PASSWORD).trim();
         this.timeout = Duration.ofSeconds(integer(p, "timeout_seconds", 60));
         this.progressWindow = bool(p, "progress_window", true);
     }

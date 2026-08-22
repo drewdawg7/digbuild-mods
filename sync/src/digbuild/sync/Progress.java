@@ -28,17 +28,17 @@ final class Progress {
     private JProgressBar bar;
     private JLabel status;
 
-    static Progress open(int fileCount, long totalBytes, boolean wanted) {
+    static Progress open(boolean wanted) {
         Progress p = new Progress();
         if (!wanted || GraphicsEnvironment.isHeadless()) return p;
         try {
-            SwingUtilities.invokeAndWait(() -> p.build(fileCount, totalBytes));
+            SwingUtilities.invokeAndWait(p::build);
         } catch (Exception ignored) {
         }
         return p;
     }
 
-    private void build(int fileCount, long totalBytes) {
+    private void build() {
         dialog = new JDialog((java.awt.Frame) null, "digbuild", false);
         dialog.setDefaultCloseOperation(WindowConstants.DO_NOTHING_ON_CLOSE);
 
@@ -47,8 +47,7 @@ final class Progress {
 
         JPanel panel = new JPanel(new BorderLayout(0, 8));
         panel.setBorder(BorderFactory.createEmptyBorder(16, 16, 16, 16));
-        panel.add(new JLabel("Updating mods: %d file%s, %s"
-                .formatted(fileCount, fileCount == 1 ? "" : "s", mb(totalBytes))), BorderLayout.NORTH);
+        panel.add(new JLabel("Updating mods"), BorderLayout.NORTH);
         panel.add(bar, BorderLayout.CENTER);
         panel.add(status, BorderLayout.SOUTH);
 
@@ -77,7 +76,4 @@ final class Progress {
         });
     }
 
-    private static String mb(long bytes) {
-        return bytes < 1024 * 1024 ? (bytes / 1024) + " KB" : (bytes / (1024 * 1024)) + " MB";
-    }
 }

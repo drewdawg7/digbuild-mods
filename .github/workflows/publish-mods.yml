@@ -58,34 +58,19 @@ jobs:
           fi
           ls -lh mods-latest.zip
 
-      # What digbuild-sync reads, and deliberately not gated on a mod having
-      # changed: the client checks on every launch, so the manifest has to be
-      # there and current even on a run that publishes no release. Uploads only
-      # the jars whose contents are new to the mod-store release.
-      - name: Publish the client manifest
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: python3 scripts/publish_manifest.py
-
       - name: Publish release
         if: steps.sync.outputs.changed == 'true'
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           TAG="mods-$(date -u +%Y%m%d-%H%M%S)"
-          # A copy of the manifest rides the release as a record of exactly
-          # what this one contained. The client reads the mod-store copy; this
-          # is not the authoritative one.
           gh release create "$TAG" \
             --title "Mods $(date -u +%Y-%m-%d\ %H:%M) UTC" \
             --notes-file CHANGES.md \
-            mods-latest.zip mods-manifest.tsv
+            mods-latest.zip
 
-      # Ungated, because the sync step now fills a cold mirror even on a run
-      # that publishes nothing -- and leaving that unsaved means re-pulling
-      # 466MB off the game server on the next one. Re-saving an existing key is
-      # a warning, not a failure.
       - name: Save mod mirror
+        if: steps.sync.outputs.changed == 'true'
         uses: actions/cache/save@v4
         with:
           path: mods
@@ -107,9 +92,6 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          # mod-store is not a release in this sense -- it is the jar store the
-          # in-game updater fetches from, and deleting it breaks every client.
           gh release list --limit 100 --json tagName --jq '.[].tagName' \
-            | grep -v '^mod-store$' \
             | tail -n +6 \
             | xargs -r -n1 gh release delete --yes --cleanup-tag
