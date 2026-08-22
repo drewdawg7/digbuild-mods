@@ -58,16 +58,27 @@ jobs:
           fi
           ls -lh mods-latest.zip
 
+      # What digbuild-sync reads. Uploads only the jars whose contents changed
+      # to the long-lived mod-store release, then writes the manifest that the
+      # new release carries.
+      - name: Publish per-jar manifest
+        if: steps.sync.outputs.changed == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: python3 scripts/publish_manifest.py
+
       - name: Publish release
         if: steps.sync.outputs.changed == 'true'
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           TAG="mods-$(date -u +%Y%m%d-%H%M%S)"
+          # mods-manifest.tsv rides the release so the client resolves it
+          # through /latest/download/ -- no API call, nothing pinned in the jar.
           gh release create "$TAG" \
             --title "Mods $(date -u +%Y-%m-%d\ %H:%M) UTC" \
             --notes-file CHANGES.md \
-            mods-latest.zip
+            mods-latest.zip mods-manifest.tsv
 
       - name: Save mod mirror
         if: steps.sync.outputs.changed == 'true'
@@ -92,6 +103,9 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
+          # mod-store is not a release in this sense -- it is the jar store the
+          # in-game updater fetches from, and deleting it breaks every client.
           gh release list --limit 100 --json tagName --jq '.[].tagName' \
+            | grep -v '^mod-store$' \
             | tail -n +6 \
             | xargs -r -n1 gh release delete --yes --cleanup-tag

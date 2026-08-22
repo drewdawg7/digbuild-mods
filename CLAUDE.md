@@ -22,6 +22,8 @@ Players connect at **`minecraft.abcdefc.gg`**; the server wiki is at
 | `agent/` | `digbuild-modsync` — a small Forge mod that runs on the game server and fires a `repository_dispatch` when `mods/` changes |
 | `.github/workflows/publish-mods.yml` | Sync → zip → release → prune |
 | `patch/` | `digbuild-heappatch` — a server-only Forge mod carrying fixes that can only be applied from inside the JVM (see **Heap sizing** below) |
+| `sync/` | `digbuild-sync` — the **client-side** updater: pulls new mods at launch, before Forge reads `mods/` (see **Client mod sync** below) |
+| `scripts/publish_manifest.py` | Publishes what `digbuild-sync` reads: the per-jar manifest and the jars themselves |
 | `tweaks/` | `digbuild-tweaks` — a server-only Forge mod holding this pack's gameplay tweaks, each config-driven and reloadable in place (see **Gameplay tweaks** below) |
 | `scripts/setup_squaremap.py` | Installs/configures the web map |
 | `.claude/docs/` | Mod reference documentation (see below) |
@@ -301,6 +303,112 @@ apply the carryover twice.
 Note this is a balance decision, not just a fix: it makes every such recipe an
 upgrade path rather than a sink, pack-wide.
 
+## Client mod sync
+
+`digbuild-sync` is the client half of the pipeline: at launch it fetches the
+published manifest, downloads the jars the player is missing, removes the ones
+the pack dropped, and lets the game carry on booting. It replaces telling
+players to re-download a zip every time a mod changes.
+
+**It is a ModLauncher service, not a Forge mod**, because a mod cannot add mods
+— Forge builds its mod list during boot and opens every jar, and nothing may
+join that list afterwards. `ModDirTransformerDiscoverer` scans `mods/` for jars
+declaring `META-INF/services/cpw.mods.modlauncher.api.ITransformationService`
+and hoists them onto the boot layer *before* `ModsFolderLocator` lists the
+directory, so a jar downloaded there loads on the same launch. No restart, and
+no fighting Windows over a jar the game already holds open — nothing has opened
+`mods/` yet.
+
+Three ordering facts, all read out of Forge 47.4.10 and modlauncher 10.0.9
+rather than assumed, because the whole design rests on them:
+
+| Fact | Where |
+|---|---|
+| Service jars in `mods/` are loaded before mod discovery | `ModDirTransformerDiscoverer.scan` |
+| …and are then skipped by mod discovery, so they need no `mods.toml` | `ModsFolderLocator` vs `ModDirTransformerDiscoverer.allExcluded()` |
+| `GAMEDIR`/`LAUNCHTARGET` are set after every `onLoad` and before every `initialize`; `beginScanning` is after both | `TransformationServicesHandler.initializeTransformationServices` |
+
+That last one is why the work happens in `initialize` and not `onLoad` — the
+game directory is not in the environment yet during `onLoad`.
+
+Consequences worth knowing before changing any of it:
+
+- **No in-game UI.** One jar cannot be both a service and a mod, so there is no
+  main-menu button; the switch is `enabled` in
+  `config/digbuild-sync.properties`, written with defaults on first launch.
+- **Nothing here may touch a Minecraft or Forge class.** The game's class loader
+  does not exist yet. Stdlib only, and that is a constraint rather than taste.
+- **It does not update itself.** Its own jar is open on the boot layer by the
+  time its code runs. A new `digbuild-sync` reaches players the way the first
+  one did — in the zip from the wiki.
+- **It ships inside the pack**, so it also sits in the game server's `/mods`.
+  `DigbuildSyncService` checks `LAUNCHTARGET` and does nothing server-side;
+  syncing the server against a manifest built from that same server is a loop.
+
+### What it will and will not delete
+
+The deletion rules are the part to be careful with, because the failure mode is
+a player's folder rather than a log line:
+
+- a jar this mod installed, once the manifest stops listing it;
+- a jar this mod installed that declares the same **mod id** as one being
+  installed — a version bump renames the file, so the old copy is not "dropped"
+  by name, and Forge aborts the boot on a duplicate mod id rather than
+  tolerating it;
+- **nothing the player added, ever.** An unmanaged jar clashing by mod id is
+  moved to `mods/.digbuild-sync-disabled/` rather than deleted: it cannot stay
+  in `mods/`, but the file is theirs. `remove_dropped = false` turns all of it
+  off.
+
+`config/digbuild-sync-state.properties` is what makes that distinction
+possible: it records the filenames this mod installed, plus a size/mtime-keyed
+sha1 cache so an unchanged pack costs one stat per jar instead of hashing
+466 MB. First launch adopts the jars the manifest also names — those came out of
+the zip — and leaves the rest alone. Deleting the file makes the next launch
+re-adopt whatever is in `mods/`.
+
+Note this inherits the caveat already on `remove-mods.txt`: a client-side
+library the server dropped may still be holding up a mod the player added, and
+this removes it without asking.
+
+### Hosting
+
+Two GitHub Release assets, the same host the wiki's install page already points
+at, so there is no new service to run:
+
+| Asset | Where | Why |
+|---|---|---|
+| `mods-manifest.tsv` | each new release | reached via `/releases/latest/download/`, so the client needs no API call and pins no version |
+| `<sha1>.jar` | the long-lived `mod-store` release | one stable URL per jar, so a client three mods behind fetches three jars rather than 466 MB |
+
+The store is content-addressed, which makes uploads idempotent — a publish
+transfers only the jars that actually changed — and it is never pruned; pruning
+would 404 a client that read the manifest moments earlier. **The prune step
+skips `mod-store`**; deleting it breaks every client.
+
+The manifest is tab-separated rather than JSON because neither end has a parser:
+the client is stdlib-only Java and the publisher stdlib-only Python. Its first
+line carries a format version, and a client that does not recognise it refuses
+the manifest and leaves `mods/` alone rather than acting on half of it.
+
+### Building and testing
+
+```bash
+python3 sync/build_mod.py     # -> sync/digbuild-sync-1.0.0.jar
+python3 sync/verify_sync.py   # end-to-end against a throwaway game dir
+```
+
+`verify_sync.py` serves real jars over a local HTTP server and runs
+`SyncCore.main` against a temp game directory: it covers the download, the sha1
+check, the mod-id replacement, what is left alone, the dropped case, the
+disabled case and the offline case. It cannot cover "Forge then picks the jar
+up" — that needs a real client — but everything before that point is ordinary
+file work and is tested.
+
+Deploying is unlike the other digbuild jars: it goes into the server's `/mods`
+like an ordinary mod and the existing pipeline publishes it. There is no
+exclusion to push first, because it is meant to ship.
+
 ## Public addresses
 
 | | |
@@ -351,7 +459,9 @@ pack. Keep it.
 
 `EXCLUDE_PREFIXES` in `sync_mods.py` keeps server-only jars out of the
 player-facing pack — currently `digbuild-modsync`, `digbuild-heappatch`,
-`digbuild-tweaks`, `squaremap` and `spark`.
+`digbuild-tweaks`, `squaremap` and `spark`. **`digbuild-sync` is deliberately
+not on that list**: it is the one digbuild jar players need, and it lives in the
+server's `/mods` only so this pipeline carries it into the pack.
 
 > **Push the exclusion before the jar reaches `/mods`.** CI checks out `origin`
 > and runs *that* copy of `sync_mods.py`, never the one on your laptop, and the

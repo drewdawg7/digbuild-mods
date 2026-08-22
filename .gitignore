@@ -1,6 +1,7 @@
 # The mirror is 466MB and lives in the Actions cache, never in git.
 mods/
 mods-latest.zip
+mods-manifest.tsv
 CHANGES.md
 
 # Agent build artifacts and the real (secret-bearing) config.
@@ -32,3 +33,8 @@ tweaks/digbuild-tweaks-*.jar
 agent/digbuild-modsync-*.jar
 agent/forgelib
 agent/pack.mcmeta
+
+# sync/ pulls its own compile-only jars off the server, same as patch/.
+sync/lib/
+sync/build/
+sync/digbuild-sync-*.jar
