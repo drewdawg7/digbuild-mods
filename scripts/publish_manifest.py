@@ -12,8 +12,10 @@ Two pieces:
                   (<sha1>.jar). Content-addressed so an upload is idempotent:
                   a publish only transfers the jars that actually changed, and
                   two mods that happen to share a filename cannot collide.
-  mods-manifest.tsv  attached to each new release, so /latest/download/ resolves
-                  it with no API call and no version pinned in the client jar.
+  mods-manifest.tsv  attached to mod-store as well, at a URL that never moves.
+                  Not to "the latest release": the client checks on every launch
+                  and the answer has to exist whether or not a mod changed
+                  today, which a release-gated asset cannot promise.
 
 The store is never pruned. It grows by the size of each changed jar, which is
 small next to a release a run, and pruning risks 404ing a client that fetched
@@ -141,6 +143,13 @@ def main(argv=None):
         rows.append("\t".join([digest, str(jar.stat().st_size), jar.name, f"{base}/{digest}.jar"]))
     OUT.write_text("\n".join(rows) + "\n")
     print(f"wrote {OUT} ({len(jars)} rows)")
+
+    if not a.dry_run:
+        # Last, and --clobber: the manifest is only true once every jar it
+        # names is fetchable, so it is replaced after the uploads rather than
+        # before them.
+        gh("release", "upload", STORE_TAG, str(OUT), "--clobber")
+        print(f"published {base}/{OUT.name}")
     return 0
 
 

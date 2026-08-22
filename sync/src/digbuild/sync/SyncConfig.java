@@ -20,12 +20,13 @@ final class SyncConfig {
     static final String FILE = "digbuild-sync.properties";
 
     /**
-     * The manifest rides the /latest/ redirect, the same one the wiki's install
-     * page hands out, so a new release is picked up with no API call and
-     * nothing here to bump.
+     * A fixed URL, deliberately not the /latest/ redirect: this is asked on
+     * every launch, so the answer has to exist even when the pack has not
+     * published a release in weeks. mod-store is the one release that is never
+     * pruned, and the manifest is replaced in place each time it is rebuilt.
      */
     private static final String DEFAULT_MANIFEST =
-            "https://github.com/drewdawg7/digbuild-mods/releases/latest/download/mods-manifest.tsv";
+            "https://github.com/drewdawg7/digbuild-mods/releases/download/mod-store/mods-manifest.tsv";
 
     private static final String TEMPLATE = """
             # digbuild-sync -- pulls new mods at launch, before Forge reads mods/.

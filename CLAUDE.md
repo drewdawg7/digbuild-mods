@@ -378,13 +378,20 @@ at, so there is no new service to run:
 
 | Asset | Where | Why |
 |---|---|---|
-| `mods-manifest.tsv` | each new release | reached via `/releases/latest/download/`, so the client needs no API call and pins no version |
-| `<sha1>.jar` | the long-lived `mod-store` release | one stable URL per jar, so a client three mods behind fetches three jars rather than 466 MB |
+| `mods-manifest.tsv` | the `mod-store` release, replaced in place | a URL that never moves |
+| `<sha1>.jar` | the same `mod-store` release | one stable URL per jar, so a client three mods behind fetches three jars rather than 466 MB |
+
+**Neither is gated on a release, and the manifest step is not gated on a mod
+having changed.** The client asks on every launch, so the answer has to exist
+on a day nothing was published — which is exactly what an asset hanging off
+"the latest release" cannot promise. `sync_mods.py` therefore brings the mirror
+level on every run and only the release steps check whether anything moved.
 
 The store is content-addressed, which makes uploads idempotent — a publish
 transfers only the jars that actually changed — and it is never pruned; pruning
 would 404 a client that read the manifest moments earlier. **The prune step
-skips `mod-store`**; deleting it breaks every client.
+skips `mod-store`**; deleting it breaks every client. The manifest is uploaded
+last, after every jar it names is fetchable.
 
 The manifest is tab-separated rather than JSON because neither end has a parser:
 the client is stdlib-only Java and the publisher stdlib-only Python. Its first

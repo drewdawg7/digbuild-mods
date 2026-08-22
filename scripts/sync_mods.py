@@ -134,12 +134,12 @@ def main():
     # handed an empty mods/.
     stale_header = header_is_stale()
 
-    if not (added or removed or updated or stale_header):
-        print(f"no changes ({len(remote)} jars)")
-        emit(changed="false")
-        return 0
-
     MODS.mkdir(exist_ok=True)
+
+    # The mirror is brought level on every run, before the decision below --
+    # the client manifest is generated from these bytes, and digbuild-sync asks
+    # for it on every launch, so it has to be publishable whether or not a mod
+    # changed today. On a warm cache with nothing new this costs nothing.
 
     # Drop anything the server no longer has, plus stale local extras.
     for f in MODS.glob("*.jar"):
@@ -153,6 +153,12 @@ def main():
     for name in sorted(want):
         print(f"  + {name}")
         panel.download(f"/mods/{name}", MODS / name)
+
+    # Only the release is gated on a change. The manifest step is not.
+    if not (added or removed or updated or stale_header):
+        print(f"no changes ({len(remote)} jars)")
+        emit(changed="false")
+        return 0
 
     MANIFEST.write_text(json.dumps(remote, indent=2, sort_keys=True) + "\n")
 
