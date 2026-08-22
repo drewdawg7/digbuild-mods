@@ -191,7 +191,9 @@ loaded and cannot be re-applied afterwards.
 
 Build and deploy like the heap patch — `build_mod.py`, `verify_patch.py`, then
 `deploy.py`, which restarts behind a rollback and refuses to run with players
-online.
+online. A new tweak jar also needs its `EXCLUDE_PREFIXES` entry **pushed before
+it is uploaded**; see **The publish pipeline** for why, and for what to do if it
+went out anyway.
 
 ### enchant-applicability
 
@@ -347,8 +349,27 @@ The wiki is the player-facing destination for the mod documentation in
 that guard exists so an API hiccup cannot wipe the mirror and publish an empty
 pack. Keep it.
 
-`EXCLUDE_PREFIXES` in `sync_mods.py` keeps server-only jars (currently
-`digbuild-modsync`) out of the player-facing pack.
+`EXCLUDE_PREFIXES` in `sync_mods.py` keeps server-only jars out of the
+player-facing pack — currently `digbuild-modsync`, `digbuild-heappatch`,
+`digbuild-tweaks`, `squaremap` and `spark`.
+
+> **Push the exclusion before the jar reaches `/mods`.** CI checks out `origin`
+> and runs *that* copy of `sync_mods.py`, never the one on your laptop, and the
+> agent fires on the first boot after any change to `/mods`. So a server-only
+> jar uploaded while its `EXCLUDE_PREFIXES` entry is still an uncommitted local
+> edit gets picked up by a workflow that has never heard of it, zipped, and
+> released to every player. That is exactly how `digbuild-tweaks-1.0.0.jar`
+> ended up in release `mods-20260821-230123`.
+>
+> Order is: commit and push the exclusion, *then* upload the jar. This is the
+> one part of a server-only mod's deploy that is not local — the build, the
+> verify and the upload all are, which is what makes it easy to forget.
+>
+> To recover once it has shipped: push the exclusion, then
+> `gh workflow run publish-mods.yml`. The next sync sees the jar as removed,
+> drops it from `manifest.json` and publishes a corrected pack. Doing nothing
+> also works eventually — any later mod change republishes without it — but the
+> bad release stays downloadable until the 5-release prune ages it out.
 
 ## Mod documentation
 
